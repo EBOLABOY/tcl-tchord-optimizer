@@ -14,12 +14,12 @@
     "10_reserved_2": 50
   },
   "channel_mask": {
-    "hex": "0xffffb",
-    "decimal": 1048571,
-    "description": "Pass-through all surround/overhead/LFE channels to soundbar while dedicating center dialogue elevation to TV screen speaker"
+    "hex": "0xffffff",
+    "decimal": 16777215,
+    "description": "Full Bitstream Passthrough to Q95K soundbar (all channels active including center), with TV speaker performing digital tap for HRTF 350Hz elevation fusion"
   },
   "vertical_sound_field": {
-    "elevation_gain_db": 3,
+    "elevation_gain_db": 2,
     "crossover_highpass_hz": 350,
     "hrtf_elevation_filter": true
   }

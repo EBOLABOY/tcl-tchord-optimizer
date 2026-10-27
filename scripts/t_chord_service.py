@@ -27,10 +27,10 @@ HTTP_PORT = 8998
 REFRESH_TOKEN = "4e180e92593b11ee7953ce89a7345d067f92b7a43e66e3f4ffc7640d003df735e573263c025c83c043c4e2ef35da86a84796c9243ac7fd0255bbaf30de68078f"
 CLIENT_ID = "http://192.168.100.4:8123/"
 
-# Calibration parameters
+# Calibration parameters (Dual-Center Fusion Mode)
 DEFAULT_LATENCIES = "48,65,72,85,90,98,80,60,88,50,50"
-DEFAULT_CHANNEL_MASK = "1048571" # 0xffffb
-DEFAULT_VERTICAL_PARAMS = "elevation_gain=3dB,crossover_hz=350,hrtf_enable=1"
+DEFAULT_CHANNEL_MASK = "16777215" # 0xffffff: 回音壁满血全开透传 + 电视高位抽头融合
+DEFAULT_VERTICAL_PARAMS = "elevation_gain=2dB,crossover_hz=350,hrtf_enable=1"
 
 state_info = {
     "status": "已就绪",
@@ -39,7 +39,7 @@ state_info = {
     "soundbar_ip": SOUNDBAR_IP,
     "latencies": DEFAULT_LATENCIES,
     "crossover": "350 Hz",
-    "elevation": "+3 dB"
+    "elevation": "+2 dB"
 }
 
 def get_ha_token():
@@ -63,14 +63,16 @@ def update_ha_sensor(state_str, extra_attrs=None):
             "soundbar_model": "TCL Q95K 11.1.4 (Illusonic DSP)",
             "tv_ip": TV_IP,
             "soundbar_ip": SOUNDBAR_IP,
-            "mode": "T-Chord 纯原生无损声学对齐",
+            "mode": "透传+双中置垂直声学融合矩阵 (Dual-Center Fusion)",
+            "soundbar_passthrough": "100% 满血透传 (Q95K 中置+环绕+低音炮全开)",
+            "tv_dialogue_tap": "350Hz 高通截留中置辅音 (HRTF +2dB 屏幕中心锚定)",
             "latency_pcm": "48 ms",
             "latency_ddp_atmos": "85 ms",
             "latency_truehd_atmos": "98 ms",
             "latency_dts_x": "88 ms",
             "crossover_frequency": "350 Hz 高通分频",
-            "dialogue_elevation": "+3 dB 屏幕中心抬升",
-            "channel_mask": "0xffffb (独立低音+环绕)",
+            "dialogue_elevation": "+2 dB 屏幕中心抬升",
+            "channel_mask": "0xffffff (双中置协同，回音壁满血)",
             "last_injected_time": state_info["last_injected"],
             "disk_safety": "100% 纯内存生效 (断电物理复原)"
         }
