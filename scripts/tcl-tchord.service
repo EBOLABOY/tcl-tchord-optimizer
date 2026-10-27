@@ -1,0 +1,14 @@
+[Unit]
+Description=TCL T-Chord Joint Optimizer Service & Home Assistant Bridge
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+ExecStart=/usr/bin/python3 /root/t_chord_service.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

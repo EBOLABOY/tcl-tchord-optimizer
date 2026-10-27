@@ -80,6 +80,12 @@ python3 t_chord_joint_orchestrator.py --show-params
 python3 t_chord_joint_orchestrator.py --soundbar-ip 192.168.100.134 --tv-ip 192.168.100.101
 ```
 
+### 自动化与 Home Assistant 联动（推荐）
+如果你运行了 Home Assistant，可直接部署常驻后台服务，实现**电视开机自动注入**与**仪表盘实时状态感知**：
+* 详见 [Home Assistant 自动化与状态监控集成指南](docs/HOME_ASSISTANT_INTEGRATION.md)。
+* 服务监听电视电源状态转换（`off -> on`），3秒后全自动生效。
+* 提供赛博朋克风 Lovelace Mushroom 卡片，实时展现 11 种编解码时延、350Hz 高通分频与人声抬升状态，支持一键重新校准。
+
 ---
 
 ## 4. 安全保障与 100% 物理回退承诺
