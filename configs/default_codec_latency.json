@@ -1,0 +1,26 @@
+{
+  "description": "TCL T-Chord 11-Slot Codec Latency Calibration Table (ms)",
+  "slots": {
+    "0_pcm": 48,
+    "1_dd_ac3": 65,
+    "2_ddp_eac3": 72,
+    "3_ddp_atmos": 85,
+    "4_truehd": 90,
+    "5_truehd_atmos": 98,
+    "6_dolby_mat_pcm": 80,
+    "7_dts": 60,
+    "8_dtshd_dtsx": 88,
+    "9_reserved_1": 50,
+    "10_reserved_2": 50
+  },
+  "channel_mask": {
+    "hex": "0xffffb",
+    "decimal": 1048571,
+    "description": "Pass-through all surround/overhead/LFE channels to soundbar while dedicating center dialogue elevation to TV screen speaker"
+  },
+  "vertical_sound_field": {
+    "elevation_gain_db": 3,
+    "crossover_highpass_hz": 350,
+    "hrtf_elevation_filter": true
+  }
+}
