@@ -1,8 +1,8 @@
-# Home Assistant 自动化与状态监控集成指南
+# Home Assistant 自动化与状态监控集成指南 (v2.0)
 
 本项目提供了与 **Home Assistant (HAOS / Supervised / Container)** 的全自动联动方案，实现：
-1. **开机自愈（Zero-Touch Auto-Injection）**：实时监听电视状态变化，开机 3 秒内自动向 MediaTek Audio HAL 注入精准时延与分频参数。
-2. **仪表盘状态感知（Live UI Status Monitoring）**：通过 Mushroom 仪表盘卡片实时展现优化生效状态、11 种音频格式时延、350Hz 高通分频与人声抬升指标。
+1. **开机自愈（Zero-Touch Auto-Injection）**：实时监听电视状态变化，开机 3.5 秒内自动通过 ADB 及内存注入器向 MediaTek Audio HAL 注入精准时延与分频参数。
+2. **仪表盘状态感知（Live UI Status Monitoring）**：通过 Mushroom 仪表盘卡片实时展现优化生效状态、11 种音频格式时延、480Hz Linkwitz-Riley 4阶高通分频与 Blauert 3.5kHz 人声抬升指标。
 3. **一键重新校准（Manual One-Tap Recalibration）**：可在 HA 仪表盘上一键触发重新注入。
 
 ---
@@ -23,7 +23,7 @@
 | - WebSocket Client: 实时监听 media_player.ke_ting_... |
 +-------------+-----------------------------+-----------+
               |                             |
-      T-Cast Port 6553              HTTPS Port 8043
+       ADB Port 5555                 HTTPS Port 8043
               v                             v
 +---------------------------+ +-------------------------+
 | TCL 75Q9M Pro TV          | | TCL Q95K Flagship       |
@@ -62,6 +62,9 @@ rest_command:
   tcl_tchord_inject:
     url: "http://<SERVICE_HOST_IP>:8998/inject"
     method: POST
+  tcl_tchord_restore:
+    url: "http://<SERVICE_HOST_IP>:8998/restore"
+    method: POST
 
 # 2. 注册实体按钮（用于 UI 触发）
 template:
@@ -71,6 +74,11 @@ template:
         icon: mdi:tune-vertical
         press:
           - action: rest_command.tcl_tchord_inject
+      - name: "TCL T和弦恢复出厂默认"
+        unique_id: tcl_tchord_restore
+        icon: mdi:restore
+        press:
+          - action: rest_command.tcl_tchord_restore
 ```
 
 保存后在 **开发者工具 -> YAML** 中点击 **重载所有 YAML 配置**（或重启 HA）。
@@ -115,19 +123,19 @@ template:
   chips:
     - type: template
       icon: mdi:clock-fast
-      content: "对齐: 85ms"
+      content: "对齐: 80ms"
       tap_action:
         action: more-info
         entity: sensor.tcl_tchord_status
     - type: template
       icon: mdi:filter-variant
-      content: "高通: 350Hz"
+      content: "高通: 480Hz LR4"
       tap_action:
         action: more-info
         entity: sensor.tcl_tchord_status
     - type: template
       icon: mdi:arrow-up-bold
-      content: "人声: +3dB"
+      content: "高度: +3dB Blauert"
       tap_action:
         action: more-info
         entity: sensor.tcl_tchord_status
@@ -153,14 +161,14 @@ template:
 | 属性 Key | 当前值 | 声学意义 |
 | :--- | :--- | :--- |
 | `state` | `已优化 (校准生效)` | 当前声学参数处于激活生效状态 |
-| `tv_model` | `TCL 75Q9M Pro (MT9653)` | 电视硬件型号及芯片平台 |
-| `soundbar_model` | `TCL Q95K 11.1.4 (Illusonic DSP)` | 回音壁声学架构及 DSP 类型 |
-| `latency_pcm` | `48 ms` | PCM 双声道精准时延 |
-| `latency_ddp_atmos` | `85 ms` | 杜比全景声 (E-AC-3 JOC) 补偿时延 |
-| `latency_truehd_atmos` | `98 ms` | 杜比 TrueHD 无损全景声时延 |
-| `latency_dts_x` | `88 ms` | DTS:X / DTS-HD MA 时延 |
-| `crossover_frequency`| `350 Hz 高通分频` | 电视扬声器低频切除点，消除塑料共振 |
-| `dialogue_elevation` | `+3 dB 屏幕中心抬升` | HRTF 纵向声场高度感强化 |
-| `channel_mask` | `0xffffb (独立低音+环绕)` | 严格声道分离掩码 |
-| `last_injected_time` | `2026-10-27 20:34:22` | 上次成功向 Audio HAL 注入的时间戳 |
+| `tv_model` | `TCL 75Q9M Pro (Pentonic 700 / MT9653)` | 电视硬件型号及芯片平台 |
+| `soundbar_model` | `TCL Q95K 11.1.4 (Illusonic DSP Type 13)` | 回音壁声学架构及 DSP 类型 |
+| `latency_pcm` | `42 ms` | PCM 双声道精准时延 |
+| `latency_ddp_atmos` | `80 ms` | 杜比全景声 (E-AC-3 JOC) 补偿时延 |
+| `latency_truehd_atmos` | `92 ms` | 杜比 TrueHD 无损全景声时延 |
+| `latency_dts_x` | `82 ms` | DTS:X / DTS-HD MA 时延 |
+| `crossover_frequency`| `480 Hz Linkwitz-Riley 4阶 (24dB/oct)` | 保护电视微型换能器，切除低频塑料共鸣与反相抵消 |
+| `dialogue_elevation` | `+3 dB 屏幕中心抬升 (Blauert 3.5kHz, Q=1.5)` | 抑制梳状滤波，利用 Blauert 频带将人声稳固拉回屏幕正中 |
+| `mode` | `T-Chord 联合声学对齐 (JAES 2015 梳状滤波消除)` | 消除垂直平面哈斯效应假设失效带来的声染色 |
+| `last_injected_time` | `2026-11-01 11:53:16` | 上次成功向 Audio HAL 注入的时间戳 |
 | `disk_safety` | `100% 纯内存生效 (断电物理复原)` | 零刷机、零改写只读系统镜像 |

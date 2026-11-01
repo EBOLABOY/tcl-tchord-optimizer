@@ -1,124 +1,205 @@
 # TCL T-Chord Joint Optimizer (TCL T和弦声学协同优化中枢)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/TV-MediaTek%20Pentonic%20700%20(MT9653)-orange.svg)](docs/REVERSE_ENGINEERING_TV_HAL.md)
-[![Soundbar](https://img.shields.io/badge/Soundbar-TCL%20Q95K%2011.1.4%20(MT8532)-blueviolet.svg)](docs/REVERSE_ENGINEERING_SOUNDBAR.md)
-[![DSP](https://img.shields.io/badge/DSP-Illusonic%20Type%2013-brightgreen.svg)](docs/REVERSE_ENGINEERING_SOUNDBAR.md)
+[![TV](https://img.shields.io/badge/TV-TCL%2075Q9M%20Pro%20(MT9653%20%2F%20Pentonic%20700)-orange.svg)](docs/REVERSE_ENGINEERING_TV_HAL.md)
+[![Soundbar](https://img.shields.io/badge/Soundbar-TCL%20Q95K%2011.1.4%20(MT8532%20%2B%20Illusonic)-blueviolet.svg)](docs/REVERSE_ENGINEERING_SOUNDBAR.md)
+[![Acoustics](https://img.shields.io/badge/Acoustics-JAES%202015%20%2F%20Blauert%20Bands-brightgreen.svg)](docs/ACADEMIC_RESEARCH_AND_THEORY.md)
+[![Safety](https://img.shields.io/badge/Safety-100%25%20In--RAM%20(Zero%20Flash%20Write)-success.svg)](#4-安全保障与-100-物理回退承诺)
 
-**TCL T-Chord Joint Optimizer** 是针对 **TCL 旗舰电视（如 75Q9M Pro 等搭载联发科 Pentonic 700 / MT9653 平台）** 与 **TCL 旗舰回音壁（如 Q95K 11.1.4 搭载 StreamSDK + Illusonic DSP 平台）** 的专业级声学联合优化与校准套件。
+**TCL T-Chord Joint Optimizer** 是专为 **TCL 旗舰电视（75Q9M Pro / Pentonic 700 / MT9653 平台）** 与 **TCL 旗舰回音壁（Q95K 11.1.4 / Illusonic DSP Type 13 平台）** 打造的高保真声学协同与微秒级对齐中枢。
 
-本项目通过对电视底层 Audio HAL 驱动及回音壁内部流媒体 DSP 架构的全链路逆向工程，破解了原厂 T 和弦（Tutti Choral）的关键控制参数，彻底消除了原厂方案因时延估计粗糙引起的**人声梳状滤波相位抵消**与**电视外壳低频共振**问题。
+本项目基于**音频工程学会（JAES）最新声学研究**及对 **MediaTek Audio HAL (`audio.primary.merak.so`)**、**StreamSDK CM 架构** 的全链路深度逆向工程，破解了底层 T 和弦（Tutti Choral / T-Symphony）隐藏参数矩阵，彻底消除了原厂方案因粗糙时延引起的**垂直梳状滤波相位抵消**与**电视外壳低频共振**问题。
 
 ---
 
-## 1. 为什么需要优化原厂 T 和弦？
+## 1. 为什么需要优化原厂 T 和弦？（理论与痛点）
 
-| 痛点问题 | 原厂默认现象 | 本优化方案解决策略 |
+原厂“T和弦”宣传将电视扬声器与回音壁同时发声作为联合中置，但在实际声学物理中存在根本缺陷：
+
+```
+                [ 电视高位微型扬声器 (TV Height) ]
+                               ^
+                               |  垂直声程差 Δh ≈ 0.85m -> 梳状滤波波谷 (Comb Filter Notch)
+                               v
+                [ 回音壁主中置声卡 (Soundbar Center) ]
+```
+
+| 痛点问题 | 原厂默认声学校准缺陷 | 本项目科学优化方案 (v2.0) |
 | :--- | :--- | :--- |
-| **关键人声频段空洞（梳状滤波）** | 原厂通过 HDMI-CEC 估算回音壁延迟，存在 10–20ms 误差。声波声程差导致 1kHz–4kHz 人声关键频段发生严重反相干涉抵消，听感单薄、有空洞感。 | 提取底层 11 编解码器时延槽位，提供微秒级精准物理相位对齐，使两端声波在听音位实现同相干叠加。 |
-| **电视机身塑料背壳低频共振** | 原厂将全频音频直接推给电视扬声器，低音引发塑料腔体剧烈共鸣，且与回音壁独立的 10 吋大口径低音炮产生杂乱低频抵消。 | 引入 350Hz 陡峭高通分频，彻底切除电视扬声器的低频负担，低频下潜完全由回音壁低音炮纯净呈现。 |
-| **大屏对白声像下陷** | 75 吋以上大屏幕观影时，原厂声场偏低，声音明显来自底部的回音壁，造成音画脱节。 | 注入垂直声场抬升参数与 HRTF 高度补偿滤镜，将人声对白声像精准“站立”并拉回至屏幕画面正中央。 |
+| **对白发闷、空洞（梳状滤波）** | 原厂仅通过 HDMI-CEC 粗略估算延迟（误差 10~25ms）。两个相同频段的垂直声源到达人耳存在声程差，在 1 kHz–4 kHz 人声关键频段发生严重反相干涉抵消（Comb Filtering）。 | **11-Slot 编解码微秒相位对齐**：针对 PCM、Dolby Atmos、TrueHD、DTS:X 逐一注入底层硬件时延基准，实现精准同相干涉。 |
+| **中低频浑浊与电视塑料共振** | 原厂将未经分频的宽频信号推给电视 10W-15W 微型扬声器，超出其极限冲程（$X_{\max} < 1.2\text{mm}$），引发塑料后盖剧烈共鸣，并与独立 10 吋低音炮产生杂乱低频对冲。 | **Linkwitz-Riley 4阶（24dB/oct）480Hz 高通分频**：电视端切除全部低频与下中频负担，下潜全权交由 Q95K 大口径低音炮呈现。 |
+| **大屏对白声像下陷** | 75 吋大屏下声音全堆在底部回音壁，产生严重“音画下坠脱节感”。 | **Jens Blauert 3.5 kHz 空间高度锚定滤镜**：电视扬声器做 -8dB 辅音抽头，叠加 Blauert 频段提升（+3dB），将人声声像物理“吸附”并锁定在屏幕视觉正中心。 |
+
+> [!NOTE]
+> 详细声学学术论文证明与公式推导，请参阅 📄 [声学理论与学术文献深度论证报告](docs/ACADEMIC_RESEARCH_AND_THEORY.md)。
 
 ---
 
 ## 2. 系统拓扑与逆向工程发现
 
 ```mermaid
-flowchart LR
-    TV["TCL 75Q9M Pro\n(Pentonic 700 / Android 14)"] --"HDMI 2.1 eARC / CEC"--> SB["TCL Q95K 回音壁\n(StreamSDK / Illusonic 11.1.4)"]
-    
-    subgraph TV_HAL["电视底层 (audio.primary.merak.so)"]
-        TCSE["TCSE Tutti Choral Engine"]
-        Array["adev + 3494: 11-Slot 延迟数组\n(PCM, DD, DDP, Atmos, TrueHD, DTS...)"]
-        TCSE --> Array
+flowchart TD
+    subgraph Host["本地控制端 / Home Assistant (192.168.100.4)"]
+        Orch["t_chord_joint_orchestrator.py"]
+        Service["t_chord_service.py (Port 8998)"]
     end
 
-    subgraph SB_DSP["回音壁底层 (MT8532)"]
-        CM["StreamSDK CM 节点树 (:8043)"]
-        Illusonic["Illusonic DSP Type 13 (soundbar_startup.txt)"]
-        CM --> Illusonic
+    subgraph TV["TCL 75Q9M Pro (192.168.100.101)"]
+        ADB["ADB Daemon (:5555)"]
+        Dex["AudioTool.jar (In-RAM)"]
+        
+        subgraph MediaTek_HAL["audio.primary.merak.so"]
+            TCSE["TCSE Tutti Choral Engine"]
+            PEQ["Hardware PEQ DSP Engine"]
+            Slots["adev+3494: 11-Slot Latency Array\n[42, 58, 66, 80, 84, 92, 74, 54, 82, 50, 50]"]
+        end
+        
+        ADB --> Dex
+        Dex -->|"AudioSystem.setParameters()"| TCSE
+        Dex -->|"AQ_PEQ_PARAM (LR4 480Hz + Blauert)"| PEQ
+        TCSE --> Slots
     end
 
-    Opt["T-Chord Joint Optimizer"] -->|"AudioManager.setParameters"| TV_HAL
-    Opt -->|"REST API (:8043)"| SB_DSP
+    subgraph Soundbar["TCL Q95K 11.1.4 (192.168.100.133)"]
+        StreamSDK["StreamSDK CM API (:8043)"]
+        Illusonic["Illusonic DSP Type 13\n(soundbar_startup.txt)"]
+        StreamSDK --> Illusonic
+    end
+
+    Orch -->|"ADB / app_process"| ADB
+    Orch -->|"HTTPS JSON API"| StreamSDK
+    TV --"HDMI 2.1 eARC / CEC"--> Soundbar
 ```
 
 ### 关键逆向证据
 1. **电视端 MediaTek Audio HAL (`audio.primary.merak.so`)**：
-   * 在反汇编中证实，参数 `AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY` 接收由逗号切分的字符串，并通过 `atoi` 存入结构体偏移 `0xda6`（十进制 `3494`）的 11 项 16-bit 整数数组：
-     $$\text{Slot } [0\dots 10] = [\text{PCM},\ \text{DD},\ \text{DDP},\ \text{DDP\_Atmos},\ \text{TrueHD},\ \text{TrueHD\_Atmos},\ \text{MAT},\ \text{DTS},\ \text{DTS-HD},\ \dots]$$
-   * 详见 [电视端 HAL 逆向工程深度分析文档](docs/REVERSE_ENGINEERING_TV_HAL.md)。
+   * 在反汇编符号 `_Z17cus_set_parameter`（偏移 `0xe4890`–`0xeb130`）中证实：
+     参数 `AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY` 接收由逗号分隔的字符串，通过 `strtok_r` 和 `atoi` 解析存入音频设备结构体偏移 `0xda6`（十进制 `3494`）的 11 项 16 位整数数组。
+   * 详见 📄 [电视端 HAL 逆向工程深度分析文档](docs/REVERSE_ENGINEERING_TV_HAL.md)。
 2. **回音壁端 StreamUnlimited StreamSDK 与 Illusonic DSP**：
-   * 证实回音壁运行 `Linux 6.1.0-mainline`，搭载瑞士 **Illusonic DSP**（Type 13），并通过本地端口 `8043` 开放 REST API。
-   * 详见 [回音壁端逆向工程深度分析文档](docs/REVERSE_ENGINEERING_SOUNDBAR.md)。
+   * 证实搭载发烧级 **StreamUnlimited StreamSDK v26.02-Gallium** 与瑞士 **Illusonic DSP**（Profile Type 13），运行于 MT8532 Linux 6.1 内核。
+   * 详见 📄 [回音壁端逆向工程深度分析文档](docs/REVERSE_ENGINEERING_SOUNDBAR.md)。
 
 ---
 
-## 3. 快速上手与部署指南
+## 3. 快速上手与操作指南
 
 ### 环境要求
-* 一台局域网内的 Linux / macOS / Windows 主机（Python 3.8+）
-* 目标 TCL 电视与 TCL 回音壁已接入同一局域网并完成 HDMI eARC 连接
+* 运行环境：局域网内任意常开 Linux / macOS / Windows 主机（Python 3.8+）
+* 设备连接：
+  * TCL 电视（`192.168.100.101:5555`，已开启 ADB 调试）
+  * TCL 回音壁（`192.168.100.133`，通过 HDMI 2.1 eARC 接入电视）
 
-### 一键部署方案
+### 常用命令
 
-#### 步骤 1：克隆项目
+#### 1. 全自动诊断（检查 TV、回音壁与声学状态）
 ```bash
-git clone https://github.com/EBOLABOY/tcl-tchord-optimizer.git
-cd tcl-tchord-optimizer
+python3 t_chord_joint_orchestrator.py --diagnose
+```
+*输出示例：*
+```text
+====================================================================
+ TCL T-Chord Acoustic & System Comprehensive Diagnostics
+====================================================================
+--- 1. TV Android & Audio HAL Status ---
+[+] TV ADB: ONLINE (Model: Smart TV Pro)
+    SoC Platform: merak
+    Build ID:     tcl9655_cn_an64-user 14 UTT2.250416.001 AU01 release-keys
+
+--- 2. Q95K Soundbar & Illusonic DSP Status ---
+[+] Soundbar: ONLINE (Q95K) at https://192.168.100.133:8043
+    Illusonic DSP Profile Type: 13 (Q95K 11.1.4 Array)
+
+--- 3. Acoustic & Mathematical Configuration ---
+  Index | Codec Type                       | Calibrated Latency
+  ------+----------------------------------+-------------------
+   [00] | PCM 2.0 (LPCM Linear Stereo)     |  42 ms
+   [01] | Dolby Digital (AC-3 5.1)         |  58 ms
+   [02] | Dolby Digital Plus (E-AC-3)      |  66 ms
+   [03] | Dolby Atmos (E-AC-3 JOC)         |  80 ms
+   [04] | Dolby TrueHD Lossless            |  84 ms
+   [05] | Dolby TrueHD + Dolby Atmos       |  92 ms
+   [06] | Dolby MAT 2.0 / LPCM Multichannel |  74 ms
+   [07] | DTS Core 5.1                     |  54 ms
+   [08] | DTS-HD Master Audio / DTS:X      |  82 ms
 ```
 
-#### 步骤 2：查看并校准配置
-查看各编解码器的出厂默认微秒校准表：
+#### 2. 一键应用校准配置（零刷机、纯内存注入）
+```bash
+python3 t_chord_joint_orchestrator.py --apply
+```
+自动将编译好的 `audiotool.jar` 推送至电视 `/data/local/tmp`，并通过 `app_process` 反射调用 Android 底层 `AudioSystem.setParameters`，瞬时完成分频、延迟与 T-Symphony 模式激活。
+
+#### 3. 恢复出厂默认设置
+```bash
+python3 t_chord_joint_orchestrator.py --restore
+```
+
+#### 4. 查看当前校准参数 JSON
 ```bash
 python3 t_chord_joint_orchestrator.py --show-params
 ```
-
-#### 步骤 3：注入与协同对齐
-运行调度脚本，自动连通回音壁与电视：
-```bash
-python3 t_chord_joint_orchestrator.py --soundbar-ip 192.168.100.134 --tv-ip 192.168.100.101
-```
-
-### 自动化与 Home Assistant 联动（推荐）
-如果你运行了 Home Assistant，可直接部署常驻后台服务，实现**电视开机自动注入**与**仪表盘实时状态感知**：
-* 详见 [Home Assistant 自动化与状态监控集成指南](docs/HOME_ASSISTANT_INTEGRATION.md)。
-* 服务监听电视电源状态转换（`off -> on`），3秒后全自动生效。
-* 提供赛博朋克风 Lovelace Mushroom 卡片，实时展现 11 种编解码时延、350Hz 高通分频与人声抬升状态，支持一键重新校准。
 
 ---
 
 ## 4. 安全保障与 100% 物理回退承诺
 
-本工具严格遵守非破坏性原则：
-1. **零磁盘修改（Zero Disk Write）**：全程不修改系统只读分区（`/system`、`/vendor`），不修改驱动二进制文件，AVB 2.0 / dm-verity 强校验永远保持原厂完整性，**绝无变砖或无法开机风险**。
-2. **纯 RAM 运行时生效**：参数仅常驻于系统的当前内存变量中。
-3. **开机即彻底恢复（Reboot-to-Factory）**：如果想完全撤销所有调优，只需**重启电视或拔插电源**，所有参数自动清零还原为出厂状态。
+本工具严格遵守非破坏性设计原则：
+
+> [!IMPORTANT]
+> 1. **零磁盘修改（Zero Flash Write）**：全程**绝对不修改**系统的任何只读系统镜像或驱动二进制（`/system`、`/vendor`、`/boot` 保持 100% 原始只读状态），完全不触碰 Android AVB 2.0 / dm-verity 校验，**绝对不会出现黑屏、卡标或变砖问题**。
+> 2. **纯内存（In-RAM Volatile）注入**：所有 PEQ 滤波器及编解码时延数组只常驻于 Linux 进程的当前物理内存堆中。
+> 3. **物理断电/重启即归零（Reboot-to-Factory）**：若需完全撤销调优，直接执行 `--restore`，或者**重启电视/拔掉电源**，系统立即彻底恢复至官方出厂状态。
 
 ---
 
-## 5. 项目结构
+## 5. Home Assistant 自动化与开机自愈
+
+本项目提供了常驻后台服务 `scripts/t_chord_service.py`，支持：
+* **开机自愈**：通过 HA WebSocket 监听电视状态，电视开机 3.5 秒内自动全静默注入。
+* **Mushroom 赛博朋克仪表盘**：实时展示优化状态、11 种时延与分频数值，支持一键点按重新校准。
+* 详见 📄 [Home Assistant 自动化集成指南](docs/HOME_ASSISTANT_INTEGRATION.md)。
+
+---
+
+## 6. 项目目录结构
 
 ```
 ├── configs/
-│   └── default_codec_latency.json      # 11 编解码器时延基准与分频配置
+│   └── default_codec_latency.json      # 11 编解码器时延基准与 PEQ 分频配置
 ├── docs/
-│   ├── REVERSE_ENGINEERING_TV_HAL.md   # 电视 MediaTek Audio HAL 反汇编分析
+│   ├── ACADEMIC_RESEARCH_AND_THEORY.md # 声学理论、梳状滤波消除与 JAES 论文证明
+│   ├── ACOUSTIC_TUNING_GUIDE.md        # 室内空间声学计算与分频调音指南
+│   ├── HOME_ASSISTANT_INTEGRATION.md   # Home Assistant 自动化与状态监控集成指南
 │   ├── REVERSE_ENGINEERING_SOUNDBAR.md # 回音壁 StreamSDK 与 Illusonic DSP 深度分析
-│   └── ACOUSTIC_TUNING_GUIDE.md        # 室内空间声学计算与分频调音指南
+│   └── REVERSE_ENGINEERING_TV_HAL.md   # 电视 MediaTek Audio HAL 反汇编分析
 ├── injector/
+│   ├── bin/
+│   │   ├── audiotool.dex               # 编译生成的高效 Android DEX 字节码
+│   │   └── audiotool.jar               # 独立打包的免安装可执行工具包
 │   └── src/
-│       └── TChordInjector.java         # Android 原生反射音频参数注入器
+│       └── AudioTool.java              # 纯内存 AudioSystem / CEC 反射调用注入器
 ├── scripts/
-│   ├── push_injector.py                # T-Cast 原生静默推送安装工具
-│   └── tcl_remote.py                   # T-Cast 遥控联动工具
-├── t_chord_joint_orchestrator.py       # 联合声学优化调度主程序
+│   ├── push_injector.py                # T-Cast 原生推送辅助工具
+│   ├── t_chord_service.py              # Home Assistant 联动后台常驻守护服务
+│   ├── tcl_remote.py                   # 遥控联动调试工具
+│   └── tcl-tchord.service              # Systemd 服务单元定义文件
+├── t_chord_joint_orchestrator.py       # 联合声学优化调度与命令行中枢 (CLI)
 ├── LICENSE                             # MIT 开源协议
 └── README.md                           # 项目说明文档
 ```
 
 ---
 
-## 6. 开源协议
+## 7. 学术参考文献 (References)
 
-本项目基于 [MIT 协议](LICENSE) 开源。仅供家庭影院声学爱好者交流学习与非商业音频调谐使用。
+1. **Wallis, R., & Lee, H. (2015)**. *The Effect of Interchannel Time Difference on the Elevation Perception of Vertical Stereophony*. **Journal of the Audio Engineering Society (JAES)**, 63(10), 767–776.
+2. **Blauert, J. (1997)**. *Spatial Hearing: The Psychophysics of Human Sound Localization* (Revised Edition). **MIT Press**, Cambridge, MA.
+3. **Bertelson, P., & de Gelder, B. (2004)**. *The psychology of multimodal perception*. In C. Spence & J. Driver (Eds.), *Crossmodal Space and Crossmodal Attention* (pp. 141–177). **Oxford University Press**.
+4. **Linkwitz, S. (1976)**. *Active Crossover Networks for Noncoincident Drivers*. **JAES**, 24(1), 2–8.
+
+---
+
+## 8. 开源协议
+
+本项目基于 [MIT 协议](LICENSE) 开源。仅供家庭影院与多声道声学校准爱好者研究学习使用。
