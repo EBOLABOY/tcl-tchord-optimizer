@@ -64,18 +64,19 @@ class TChordOrchestrator:
 
     def get_vol_offset_db(self) -> int:
         icld = self.config_data.get("icld_level_balance", {})
-        val = icld.get("tv_speaker_attenuation_relative_to_sbar_db", -10.0)
+        val = icld.get("tv_speaker_attenuation_relative_to_sbar_db", -7.0)
         try:
             return int(round(float(val)))
         except (ValueError, TypeError):
-            return -10
+            return -7
 
     def get_vertical_sound_field_info(self) -> Dict[str, Any]:
         vm = self.config_data.get("tri_level_height_matrix", {})
         return {
             "mode": vm.get("vertical_sound_field_mode", 1),
             "params": vm.get("vertical_sound_field_params", "elevation_gain=3dB,crossover_hz=480,hrtf_enable=0"),
-            "top_channel_gain": vm.get("top_channel_gain", 10)
+            "top_channel_gain": vm.get("top_channel_gain", 3),
+            "center_channel_gain": vm.get("center_channel_gain", 10)
         }
 
     def get_peq_command_strings(self) -> List[str]:
@@ -218,7 +219,8 @@ class TChordOrchestrator:
         print("[*] Synchronizing TV multi-sound device, eARC and 11.1.6 Top Sky settings...")
         v_info = self.get_vertical_sound_field_info()
         v_mode = v_info.get("mode", 1)
-        top_gain = v_info.get("top_channel_gain", 10)
+        top_gain = v_info.get("top_channel_gain", 3)
+        center_gain = v_info.get("center_channel_gain", 10)
 
         # 1. Enable TV Multi-sound device (T-Chord / Simultaneous speaker output)
         self.run_adb(["shell", "settings", "put", "system", "tcl_app_settings_multi_sound_device", "true"])
@@ -227,9 +229,10 @@ class TChordOrchestrator:
         # 3. Enable System Audio Mode and ARC on CEC bus
         self.run_adb(["shell", "cmd", "hdmi_control", "setsystemaudiomode", "on"])
         self.run_adb(["shell", "cmd", "hdmi_control", "setarc", "on"])
-        # 4. Activate Physical Top Sky Drivers for 11.1.6
+        # 4. Activate Physical Top Sky & Dialogue Center Drivers for 11.1.6
         self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_vertical_sound_field", str(v_mode)])
         self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_channel_top", str(top_gain)])
+        self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_channel_center", str(center_gain)])
         self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_atmos", "1"])
         # 5. Disable TV AI-AQ adaptive content and audio-visual overrides (prevents dynamic DAP +24dB vocal boost echo)
         self.run_adb(["shell", "settings", "put", "global", "tcl_app_settings_ai_audio_visual", "false"])

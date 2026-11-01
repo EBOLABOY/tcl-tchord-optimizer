@@ -41,8 +41,9 @@
     },
     "vertical_sound_field_mode": 1,
     "vertical_sound_field_params": "elevation_gain=3dB,crossover_hz=480,hrtf_enable=0",
-    "top_channel_gain": 10,
-    "rationale": "Combines 4x up-firing reflection drivers from Q95K with 2x physical top sky drivers from TV into a continuous 6-point hemispherical height dome (.6). HRTF reflections disabled (hrtf_enable=0) to prevent room reverberation doubling."
+    "top_channel_gain": 3,
+    "center_channel_gain": 10,
+    "rationale": "Combines 4x up-firing reflection drivers from Q95K with 2x physical top sky drivers from TV into a continuous 6-point hemispherical height dome (.6). HRTF reflections disabled (hrtf_enable=0) to prevent room reverberation doubling. Top sky gain balanced to 3dB to prevent ambient background music from masking center dialogue."
   },
   "crossover_network": {
     "topology": "Linkwitz-Riley 4th Order (24dB/octave)",
@@ -57,8 +58,15 @@
     "rationale": "Activates human pinna directional band (Vorn-Oben) to elevate dialogue phantom center directly across the 40cm gap to display screen midline"
   },
   "icld_level_balance": {
-    "tv_speaker_attenuation_relative_to_sbar_db": -10.0,
-    "rationale": "Per Wallis & Lee (JAES 2015) and 40cm/2.4m geometry: -10dB TV attenuation provides optimal subliminal phantom image height elevation without perceptible dual-source voice doubling or slapback echo"
+    "tv_speaker_attenuation_relative_to_sbar_db": -7.0,
+    "rationale": "Per Wallis & Lee (JAES 2015) and 40cm/2.4m geometry: -7dB TV attenuation ensures robust dialogue presence and elevation without overpowering Q95K soundbar or creating dual-source doubling"
+  },
+  "dialogue_enhancement": {
+    "dolby_dialog_enhancer_db": 10,
+    "dolby_volume_leveler": 1,
+    "speech_intelligibility_boost_db": 5.0,
+    "speech_intelligibility_center_hz": 2000,
+    "rationale": "Engages Dolby MS12 hardware Dialog Enhancer (+10dB) and Volume Leveler (DRC) to bring whisper and speech clarity forward while curbing excessive background music and explosive SFX"
   },
   "peq_filters": [
     {
@@ -87,6 +95,15 @@
       "q": 150,
       "gain": 3,
       "description": "Blauert Front-Upward Elevation Boost (Q=1.5, +3dB)"
+    },
+    {
+      "band": 4,
+      "device": "SpeakerOutput",
+      "type": 0,
+      "fc": 2000,
+      "q": 120,
+      "gain": 5,
+      "description": "Dialogue Consonant & Speech Intelligibility Peaking (Q=1.2, +5dB)"
     }
   ]
 }

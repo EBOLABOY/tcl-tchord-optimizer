@@ -47,8 +47,9 @@ state_info = {
     "soundbar_model": "未知",
     "latencies": "",
     "crossover": "480 Hz Linkwitz-Riley 4阶",
-    "icld_offset": "-10 dB",
+    "icld_offset": "-7 dB",
     "elevation": "+3 dB Blauert Peaking (3.5 kHz)",
+    "dialogue_boost": "+5 dB (2.0 kHz) + 10 dB Dolby Enhancer",
     "architecture": "11.1.6 IMAX / Auro-3D 三层空间矩阵 (18 物理发声单元)"
 }
 
@@ -78,10 +79,11 @@ def update_ha_sensor(state_str: str, extra_attrs: Optional[dict] = None):
             "ground_layer": "11 声道 (Q95K 主条形音箱与环绕阵列 100% 满血透传)",
             "lfe_layer": ".1 声道 (Q95K 10 吋 200W 独立低音炮; 电视端切除 <480Hz)",
             "height_layer": ".6 声道 (Q95K 前反射 2 + 电视顶部直发 2 + Q95K 环绕反射 2)",
-            "dialogue_anchor": "电视底部微单元 (-10dB ICLD + 3.5kHz Blauert 抬升 40cm 对白高度)",
+            "dialogue_anchor": "电视中置微单元 (-7dB ICLD + 2kHz辅音增强 + 3.5kHz Blauert 抬升 40cm 对白高度)",
             "crossover_frequency": "480 Hz Linkwitz-Riley 4阶 (24dB/oct)",
             "dialogue_elevation": "+3 dB 屏幕中心抬升 (Blauert 3.5kHz, Q=1.5)",
-            "icld_level_balance": "-10 dB (电视 SpeakerOutput 衰减, 针对 40cm 视听距校准, 抑制回音重影)",
+            "dialogue_enhancement": "Dolby MS12 硬件对白增强 (+10dB) & Volume Leveler 动态范围压缩",
+            "icld_level_balance": "-7 dB (电视 SpeakerOutput 衰减, 针对 40cm 视听距校准, 消除回音重叠并保持人声饱满)",
             "hrtf_reflection_filter": "关闭 (hrtf_enable=0, 消除人工房间混响)",
             "speech_clear_filter": "关闭 (Speech_Clear=0, 消除人声动态相位抖动)",
             "last_injected_time": state_info["last_injected"],

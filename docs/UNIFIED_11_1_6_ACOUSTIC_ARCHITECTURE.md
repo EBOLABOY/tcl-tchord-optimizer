@@ -119,15 +119,22 @@ AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS=elevation_gain=3dB,crossover_hz=480,hrtf_ena
 # 3. 11 槽位微秒级相位基准注入 (闭合原厂状态机)
 AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY=42,58,66,80,84,92,74,54,82,50,50;AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL=16777215
 
-# 4. 下发 MediaTek <APAF> 硬件声级偏置 (-10dB 哈斯效应融合点)
-AQ_OUTPUT_VOL_OFFSET=-10;AQ_DEVICE=SpeakerOutput
+# 4. 下发 MediaTek <APAF> 硬件声级偏置 (-7dB 对白定位与动态平衡点)
+AQ_OUTPUT_VOL_OFFSET=-7;AQ_DEVICE=SpeakerOutput
 
-# 5. Linkwitz-Riley 4阶 480Hz 高通分频 (Band 1 & 2 Butterworth 级联)
+# 5. 激活 Dolby MS12 硬件级对白增强与音量平准器 (抑制背景爆音，凸显对白)
+AQ_DolbyDialogEnhancerEnable=1;AQ_DolbyDialogEnhancer=10
+AQ_DolbyVolumeLevler=1
+
+# 6. Linkwitz-Riley 4阶 480Hz 高通分频 (Band 1 & 2 Butterworth 级联)
 AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=1;Gain=0;Enable=1
 AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=2;Gain=0;Enable=1
 
-# 6. Blauert 3.5kHz 屏幕对白抬升滤波 (Band 3)
+# 7. Blauert 3.5kHz 屏幕对白垂直抬升滤波 (Band 3)
 AQ_PEQ_PARAM=1;Fc=3500;Type=0;AQ_DEVICE=SpeakerOutput;Q=150;Band=3;Gain=3;Enable=1
+
+# 8. 人声辅音清晰度与共振峰强化滤波 (Band 4: 2.0kHz, +5dB)
+AQ_PEQ_PARAM=1;Fc=2000;Type=0;AQ_DEVICE=SpeakerOutput;Q=120;Band=4;Gain=5;Enable=1
 ```
 
 ### 4.2 Android TV 系统设置联动
@@ -137,9 +144,10 @@ AQ_PEQ_PARAM=1;Fc=3500;Type=0;AQ_DEVICE=SpeakerOutput;Q=150;Band=3;Gain=3;Enable
 settings put system tcl_app_settings_multi_sound_device true
 settings put system tcl_app_settings_eARC_mode true
 
-# 激活电视顶部天空声道驱动
+# 声道电平平衡：中置对白声道拉至 +10，顶部环境天空平衡至 +3 (防止背景氛围声掩盖对白)
+settings put system tcl_sys_audio_channel_center 10
+settings put system tcl_sys_audio_channel_top 3
 settings put system tcl_sys_audio_vertical_sound_field 1
-settings put system tcl_sys_audio_channel_top 10
 settings put system tcl_sys_audio_atmos 1
 
 # 彻底禁用电视端 AI 声音内容自适应 (防止后台守护进程突发覆写 DAP GEQ +24dB 破坏声级平衡)
@@ -164,6 +172,20 @@ cmd hdmi_control setarc on
 3. **TCSE 人声增强（Speech_Clear=1）动态相位抖动**：
    * 该算法会对人声共振峰进行动态相位扩宽，导致音乐中的人声与回音壁主中置产生梳状抖动。
    * **消除方案**：设置 `AQ_TCSE_Speech_Clear=0`，确保两套系统绝对相干同相。
+
+### 4.4 “人声偏小、背景声过大”深度成因与解决方案
+
+在电视剧（以 2.0 立体声为主）播放中，极易出现“背景音/配乐震耳欲聋，但人物说话含糊听不清”的现象，成因与调优方案如下：
+1. **声源混音动态范围过大（DRC 缺失）**：流媒体电视剧为了兼顾移动端，常以高动态混音，背景音乐峰值接近 0dBFS，而演员对白通常仅在 -24LKFS。
+   * **解决方案**：注入 `AQ_DolbyVolumeLevler=1`（杜比音量平准器），硬件级压缩突发动能，将微弱对白智能垫高。
+2. **Dolby 硬件对白增强器（Dialog Enhancer）**：
+   * **解决方案**：下发 `AQ_DolbyDialogEnhancerEnable=1;AQ_DolbyDialogEnhancer=10`，在 MediaTek APAF DSP 核心内针对人声共振峰给予 +10dB 独立瞬态增强。
+3. **天空通道声能反客为主**：
+   * 此前天空声道增益为 `+10`，在电视剧播放中将本应处于环境音的配乐放大过多，反向掩盖中置人声。
+   * **解决方案**：将 `tcl_sys_audio_channel_top` 回调至 `+3`，同时将 `tcl_sys_audio_channel_center` 拉高至 `+10`，中置人声成为声场绝对主角。
+4. **人声辅音清晰度 PEQ 补正**：
+   * 在电视 SpeakerOutput 增加 Band 4（$Fc=2000\text{ Hz}, Q=1.2, \text{Gain}=+5\text{ dB}$），辅音齿音咬字立刻清晰通透。
+   * 电视 Speaker 衰减从过度压制的 -10dB 回退到 **-7dB**，为人声拉升提供充沛的实体能量。
 
 ---
 

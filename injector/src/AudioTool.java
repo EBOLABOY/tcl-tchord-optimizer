@@ -68,7 +68,7 @@ public class AudioTool {
         System.out.println("=====================================================");
 
         String latencies = "42,58,66,80,84,92,74,54,82,50,50";
-        int volOffsetDb = -10;
+        int volOffsetDb = -7;
         List<String> peqCommands = new ArrayList<>();
         String verticalFieldParams = "elevation_gain=3dB,crossover_hz=480,hrtf_enable=0";
 
@@ -106,6 +106,8 @@ public class AudioTool {
         commands.add("AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS=" + verticalFieldParams);
         commands.add("AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY=" + latencies + ";AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL=16777215");
         commands.add("AQ_OUTPUT_VOL_OFFSET=" + volOffsetDb + ";AQ_DEVICE=SpeakerOutput");
+        commands.add("AQ_DolbyDialogEnhancerEnable=1;AQ_DolbyDialogEnhancer=10");
+        commands.add("AQ_DolbyVolumeLevler=1");
         commands.addAll(peqCommands);
 
         int failCount = 0;
