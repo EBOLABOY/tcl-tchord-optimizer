@@ -5,8 +5,13 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root
-ExecStart=/usr/bin/python3 /root/t_chord_service.py
+WorkingDirectory=/root/tcl-tchord-optimizer
+Environment=HA_HOST=192.168.100.4
+Environment=HA_PORT=8123
+Environment=HA_TOKEN=YOUR_HA_LONG_LIVED_ACCESS_TOKEN
+Environment=TV_IP=192.168.100.101
+Environment=HA_ENTITY_ID=media_player.ke_ting_dian_shi
+ExecStart=/usr/bin/python3 /root/tcl-tchord-optimizer/scripts/t_chord_service.py
 Restart=always
 RestartSec=5
 

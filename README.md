@@ -4,7 +4,7 @@
 [![TV](https://img.shields.io/badge/TV-TCL%2075Q9M%20Pro%20(MT9653%20%2F%20Pentonic%20700)-orange.svg)](docs/REVERSE_ENGINEERING_TV_HAL.md)
 [![Soundbar](https://img.shields.io/badge/Soundbar-TCL%20Q95K%2011.1.4%20(MT8532%20%2B%20Illusonic)-blueviolet.svg)](docs/REVERSE_ENGINEERING_SOUNDBAR.md)
 [![Acoustics](https://img.shields.io/badge/Acoustics-JAES%202015%20%2F%20Blauert%20Bands-brightgreen.svg)](docs/ACADEMIC_RESEARCH_AND_THEORY.md)
-[![Version](https://img.shields.io/badge/Release-v2.1.0-blue.svg)](https://github.com/EBOLABOY/tcl-tchord-optimizer)
+[![Version](https://img.shields.io/badge/Release-v2.1.1-blue.svg)](https://github.com/EBOLABOY/tcl-tchord-optimizer)
 [![Safety](https://img.shields.io/badge/Safety-100%25%20In--RAM%20(Zero%20Flash%20Write)-success.svg)](#4-安全保障与-100-物理回退承诺)
 
 **TCL T-Chord Joint Optimizer** 是专为 **TCL 旗舰电视（75Q9M Pro / Pentonic 700 / MT9653 / MT9655 平台）** 与 **TCL 旗舰回音壁（Q95K 11.1.4 / Illusonic DSP Type 13 平台）** 打造的高保真声学协同与微秒级相位对齐中枢。
@@ -25,7 +25,7 @@
                 [ 回音壁主中置声卡 (Soundbar Center) ]
 ```
 
-| 痛点问题 | 原厂默认声学校准缺陷 | 本项目科学优化方案 (v2.1.0) |
+| 痛点问题 | 原厂默认声学校准缺陷 | 本项目科学优化方案 (v2.1.1) |
 | :--- | :--- | :--- |
 | **对白发闷、空洞（梳状滤波）** | 原厂仅通过 HDMI-CEC 粗略估算延迟（误差 10~25ms）。两个相同频段的垂直声源到达人耳存在声程差，在 1 kHz–4 kHz 人声关键频段发生严重反相干涉抵消（Comb Filtering）。 | **11-Slot 编解码微秒相位对齐**：针对 PCM、Dolby Atmos、TrueHD、DTS:X 逐一注入底层硬件时延基准，实现精准同相干涉。 |
 | **中低频浑浊与电视塑料共振** | 原厂将未经分频的宽频信号推给电视 10W-15W 微型扬声器，超出其极限冲程（$X_{\max} < 1.2\text{mm}$），引发塑料后盖剧烈共鸣，并与独立 10 吋低音炮产生杂乱低频对冲。 | **Linkwitz-Riley 4阶（24dB/oct）480Hz 高通分频**：电视端切除全部低频与下中频负担，下潜全权交由 Q95K 大口径低音炮呈现。 |
@@ -75,7 +75,7 @@ flowchart TD
     TV --"HDMI 2.1 eARC / CEC"--> Soundbar
 ```
 
-### 关键逆向工程证据与 Bug 修复 (v2.1.0)
+### 关键逆向工程证据与 Bug 修复 (v2.1.1)
 1. **电视端 MediaTek Audio HAL (`audio.primary.merak.so`)**：
    * 在反汇编符号 `_Z17cus_set_parameter`（偏移 `0xe4890`–`0xeb130`）中证实：
      参数 `AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY` 接收由逗号分隔的字符串，通过 `strtok_r` 和 `atoi` 解析存入音频设备结构体偏移 `0xda6`（十进制 `3494`）的 11 项 16 位整数数组。

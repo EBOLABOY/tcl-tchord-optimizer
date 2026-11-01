@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.1.0)
+TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.1.1)
 Hardware Targets:
   - TV: TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9653 / Android 14)
   - Soundbar: TCL Q95K 11.1.4 (MediaTek MT8532 + Illusonic DSP Type 13)
@@ -37,6 +37,7 @@ class TChordOrchestrator:
     def __init__(self, tv_ip: str = DEFAULT_TV_IP, soundbar_ip: Optional[str] = None, config_path: Optional[str] = None):
         self.tv_ip = tv_ip
         self.soundbar_ip = soundbar_ip
+        self.soundbar_model = "TCL Q95K 11.1.4 (Illusonic DSP Type 13)"
         self.config_path = config_path or DEFAULT_CONFIG_PATH
         self.config_data = self._load_config()
 
@@ -103,6 +104,7 @@ class TChordOrchestrator:
                     data = json.loads(resp.read().decode("utf-8"))
                     model = data.get("value", {}).get("string_", "TCL Q95K Soundbar")
                     self.soundbar_ip = candidate_ip
+                    self.soundbar_model = model
                     details["model"] = model
                     details["ip"] = candidate_ip
 
@@ -133,6 +135,30 @@ class TChordOrchestrator:
                 continue
         return False, None, {}
 
+    def set_soundbar_lipsync(self, ip: Optional[str] = None, delay_ms: int = 0) -> bool:
+        target_ip = ip or self.soundbar_ip
+        if not target_ip:
+            return False
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        url = f"https://{target_ip}:8043/api/setData"
+        payload = {
+            "path": "settings:/imx8AudioFramework/lipSyncConf",
+            "role": "value",
+            "value": {"type": "i32_", "i32_": delay_ms}
+        }
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "TChordOrchestrator/2.1"}
+            )
+            with urllib.request.urlopen(req, context=ctx, timeout=2.5) as resp:
+                return resp.status in (200, 204)
+        except Exception:
+            return False
+
     def run_adb(self, cmd_args: List[str], timeout: int = 10) -> Tuple[int, str, str]:
         cmd = ["adb", "-s", f"{self.tv_ip}:5555"] + cmd_args
         try:
@@ -146,23 +172,28 @@ class TChordOrchestrator:
             return -3, "", str(e)
 
     def probe_tv(self) -> Tuple[bool, str]:
-        subprocess.run(["adb", "connect", f"{self.tv_ip}:5555"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
-        ret, stdout, stderr = self.run_adb(["shell", "getprop", "ro.product.model"])
+        try:
+            subprocess.run(["adb", "connect", f"{self.tv_ip}:5555"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
+        except Exception as e:
+            return False, f"ADB connection timed out / offline: {e}"
+        ret, stdout, stderr = self.run_adb(["shell", "getprop", "ro.product.model"], timeout=4)
         if ret == 0 and stdout:
             return True, stdout
-        return False, stderr or "Failed to connect to TV via ADB"
+        return False, stderr or "Failed to connect to TV via ADB (TV may be in standby/sleep)"
 
     def ensure_injector(self, force: bool = False) -> bool:
-        if not force:
-            ret, stdout, _ = self.run_adb(["shell", f"[ -f {REMOTE_JAR_PATH} ] && echo EXISTS"])
-            if ret == 0 and "EXISTS" in stdout:
-                return True
-
         if not os.path.exists(INJECTOR_JAR_PATH):
             print(f"[!] Error: Local injector jar missing at {INJECTOR_JAR_PATH}")
             return False
 
-        print(f"[*] Pushing {os.path.basename(INJECTOR_JAR_PATH)} to TV {REMOTE_JAR_PATH}...")
+        local_size = str(os.path.getsize(INJECTOR_JAR_PATH))
+
+        if not force:
+            ret, stdout, _ = self.run_adb(["shell", f"[ -f {REMOTE_JAR_PATH} ] && stat -c %s {REMOTE_JAR_PATH} 2>/dev/null || echo 0"])
+            if ret == 0 and stdout.strip() == local_size:
+                return True
+
+        print(f"[*] Deploying {os.path.basename(INJECTOR_JAR_PATH)} ({local_size} bytes) to TV {REMOTE_JAR_PATH}...")
         ret, stdout, stderr = self.run_adb(["push", INJECTOR_JAR_PATH, REMOTE_JAR_PATH])
         if ret == 0:
             print("[+] Injector deployed successfully.")
@@ -197,8 +228,14 @@ class TChordOrchestrator:
             print(f"[+] Soundbar Connected: {model} at {sbar_ip}:8043")
             print(f"    Illusonic DSP Profile: Type {dsp_type} (11.1.4 Array) | Volume: {vol}")
             if lipsync != 0:
-                print(f"[!] WARNING: Soundbar lipSyncConf is set to {lipsync} ms!")
-                print("    For exact T-Chord alignment, soundbar internal delay should be 0ms.")
+                print(f"[!] WARNING: Soundbar internal lipSyncConf is set to {lipsync} ms!")
+                print("[*] Attempting to zero out Soundbar lipSyncConf via REST API...")
+                zero_ok = self.set_soundbar_lipsync(sbar_ip, 0)
+                if zero_ok:
+                    print("[+] Soundbar lipSyncConf automatically zeroed to 0 ms.")
+                else:
+                    print("[-] Notice: Soundbar REST write returned 401/Unauthorized (firmware requires local pairing).")
+                    print("    Please set Soundbar lipSync to 0ms via TCL Home App or Soundbar remote for bit-exact T-Chord alignment.")
         else:
             print("[!] Soundbar probe did not respond on local HTTPS.")
             print("    Please ensure TV is connected to Soundbar via HDMI eARC Port 1.")
@@ -244,7 +281,7 @@ class TChordOrchestrator:
             print("=" * 70)
             return True
         else:
-            print(f"[-] Injection failed: {stderr}\n{stdout}")
+            print(f"[-] Injection failed (ret={ret}): {stderr}\n{stdout}")
             return False
 
     def restore_defaults(self) -> bool:
@@ -269,7 +306,7 @@ class TChordOrchestrator:
             print("[+] Audio HAL successfully restored to factory defaults.")
             return True
         else:
-            print(f"[-] Restore failed: {stderr}\n{stdout}")
+            print(f"[-] Restore failed (ret={ret}): {stderr}\n{stdout}")
             return False
 
     def diagnose(self):
@@ -361,7 +398,7 @@ class TChordOrchestrator:
         peq_cmds = self.get_peq_command_strings()
 
         data = {
-            "version": "2.1.0",
+            "version": "2.1.1",
             "config_file": self.config_path,
             "audio_hal_keys": {
                 "AQ_TCSE_ENABLE": "1",
@@ -385,7 +422,7 @@ class TChordOrchestrator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.1.0)",
+        description="TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.1.1)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

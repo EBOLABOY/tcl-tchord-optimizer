@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TCL T-Chord Joint Optimizer Service & Home Assistant Bridge (v2.1.0)
+TCL T-Chord Joint Optimizer Service & Home Assistant Bridge (v2.1.1)
 Monitors TV state via HA WebSocket, auto-injects on power-on via ADB AudioTool,
 and exposes REST API endpoints for Home Assistant automation.
 
@@ -72,6 +72,7 @@ def update_ha_sensor(state_str: str, extra_attrs: Optional[dict] = None):
             "soundbar_model": state_info["soundbar_model"],
             "tv_ip": CONFIG.get("tv_ip"),
             "soundbar_ip": state_info["soundbar_ip"],
+            "latencies_active": state_info["latencies"],
             "mode": "T-Chord 联合声学对齐 (JAES 2015 梳状滤波消除)",
             "soundbar_passthrough": "100% 满血透传 (Q95K 主中置+环绕+天空+低音炮)",
             "tv_dialogue_tap": "480Hz LR4 保护分频 + 3.5kHz Blauert 垂直声像锚定 (-8dB)",
@@ -106,6 +107,9 @@ async def perform_injection():
     if success:
         state_info["last_injected"] = ts
         state_info["status"] = "已优化 (校准生效)"
+        state_info["soundbar_ip"] = orchestrator.soundbar_ip or "未连接"
+        state_info["soundbar_model"] = getattr(orchestrator, "soundbar_model", "TCL Q95K 11.1.4 (Illusonic DSP Type 13)")
+        state_info["latencies"] = ",".join(str(x) for x in orchestrator.get_latencies())
         update_ha_sensor("已优化 (校准生效)")
         return {"status": "success", "timestamp": ts, "message": "Calibrated profile applied successfully"}
     else:
@@ -138,6 +142,9 @@ async def handle_diagnose(request):
     loop = asyncio.get_event_loop()
     sbar_ok, sbar_ip, sbar_details = await loop.run_in_executor(None, orchestrator.probe_soundbar)
     tv_ok, tv_model = await loop.run_in_executor(None, orchestrator.probe_tv)
+    if sbar_ok:
+        state_info["soundbar_ip"] = sbar_ip
+        state_info["soundbar_model"] = sbar_details.get("model", state_info["soundbar_model"])
     return web.json_response({
         "tv_online": tv_ok,
         "tv_model": tv_model,
@@ -210,7 +217,7 @@ async def ha_ws_monitor():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="TCL T-Chord Joint Optimizer Service & HA Bridge")
+    parser = argparse.ArgumentParser(description="TCL T-Chord Joint Optimizer Service & HA Bridge (v2.1.1)")
     parser.add_argument("--ha-host", default=DEFAULT_HA_HOST, help=f"Home Assistant host (default: {DEFAULT_HA_HOST})")
     parser.add_argument("--ha-port", type=int, default=DEFAULT_HA_PORT, help=f"Home Assistant port (default: {DEFAULT_HA_PORT})")
     parser.add_argument("--ha-token", default=DEFAULT_HA_TOKEN, help="Home Assistant Long-Lived Access Token")
@@ -233,6 +240,7 @@ def main():
     # Initial state initialization (transparent & truthful)
     state_info["tv_ip"] = args.tv_ip
     state_info["status"] = "服务已启动 (待机)"
+    state_info["latencies"] = ",".join(str(x) for x in orchestrator.get_latencies())
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

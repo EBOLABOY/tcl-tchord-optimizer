@@ -6,16 +6,16 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * TCL T-Chord In-Memory Parameter Injector & Audio HAL Tool (v2.1.0)
+ * TCL T-Chord In-Memory Parameter Injector & Audio HAL Tool (v2.1.1)
  *
  * Interacts directly with Android's hidden android.media.AudioSystem via reflection.
  * Fully volatile and non-destructive: zero disk writes, 100% RAM-only.
  *
- * Fixes addressed in v2.1.0:
+ * Features & Reliability Safeguards:
  * - Real -8dB ICLD attenuation via AQ_OUTPUT_VOL_OFFSET=<db>;AQ_DEVICE=SpeakerOutput
  * - Dynamic PEQ configuration passed directly from JSON configuration
  * - Bundled AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL to eliminate vendor HAL return code bug
- * - Removed broken Class.forName("android.hardware.hdmi.TclHdmiTvClient")
+ * - Non-zero exit code (System.exit(2)) on any AudioSystem failure to prevent false positives
  */
 public class AudioTool {
 
@@ -57,9 +57,10 @@ public class AudioTool {
         System.out.println("GET " + key + " => " + (val == null ? "" : val));
     }
 
-    private static void handleSet(String kv) {
+    private static int handleSet(String kv) {
         int ret = set(kv);
         System.out.println("SET [" + kv + "] => ret=" + ret);
+        return ret;
     }
 
     private static void handleApplyCalibratedProfile(String[] args) throws Exception {
@@ -67,7 +68,6 @@ public class AudioTool {
         System.out.println(" Applying Calibrated T-Chord Acoustic Profile (RAM)  ");
         System.out.println("=====================================================");
 
-        // Defaults if arguments are omitted
         String latencies = "42,58,66,80,84,92,74,54,82,50,50";
         int volOffsetDb = -8;
         List<String> peqCommands = new ArrayList<>();
@@ -81,7 +81,6 @@ public class AudioTool {
             } catch (NumberFormatException ignored) {}
         }
         if (args.length > 3 && args[3] != null && !args[3].trim().isEmpty()) {
-            // Semicolon-separated PEQ commands from CLI / orchestrator
             String[] peqs = args[3].split("\\|\\|");
             for (String p : peqs) {
                 if (!p.trim().isEmpty()) {
@@ -91,7 +90,6 @@ public class AudioTool {
         }
 
         if (peqCommands.isEmpty()) {
-            // Default Linkwitz-Riley 4th order (480Hz) + Blauert 3.5kHz peaking
             peqCommands.add("AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=1;Gain=0;Enable=1");
             peqCommands.add("AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=2;Gain=0;Enable=1");
             peqCommands.add("AQ_PEQ_PARAM=1;Fc=3500;Type=0;AQ_DEVICE=SpeakerOutput;Q=150;Band=3;Gain=3;Enable=1");
@@ -102,18 +100,21 @@ public class AudioTool {
         commands.add("AQ_TCSE_TUTTI_CHORAL_MODE=1");
         commands.add("AQ_TCSE_Speech_Clear=1");
         commands.add("AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=1");
-
-        // Bundling SBAR_CHANNEL with SBAR_LATENCY eliminates the vendor HAL return code bug (skips mov w21, wzr omission)
         commands.add("AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY=" + latencies + ";AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL=16777215");
-
-        // Real -8dB ICLD TV speaker attenuation offset relative to soundbar
         commands.add("AQ_OUTPUT_VOL_OFFSET=" + volOffsetDb + ";AQ_DEVICE=SpeakerOutput");
-
-        // Add PEQ filters
         commands.addAll(peqCommands);
 
+        int failCount = 0;
         for (String cmd : commands) {
-            handleSet(cmd);
+            int ret = handleSet(cmd);
+            if (ret != 0) {
+                failCount++;
+            }
+        }
+
+        if (failCount > 0) {
+            System.err.println("[-] Error: " + failCount + " Audio HAL parameter(s) failed with non-zero return code.");
+            System.exit(2);
         }
 
         System.out.println("[+] Calibrated profile successfully loaded into Audio HAL.");
@@ -129,9 +130,20 @@ public class AudioTool {
             "AQ_TCSE_Speech_Clear=0",
             "AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=0"
         );
+
+        int failCount = 0;
         for (String cmd : commands) {
-            handleSet(cmd);
+            int ret = handleSet(cmd);
+            if (ret != 0) {
+                failCount++;
+            }
         }
+
+        if (failCount > 0) {
+            System.err.println("[-] Warning: Failed to restore " + failCount + " parameter(s).");
+            System.exit(2);
+        }
+
         System.out.println("[+] Defaults restored.");
     }
 
@@ -164,13 +176,18 @@ public class AudioTool {
                         handleGet(args[1]);
                     } else {
                         System.err.println("Missing key argument for get");
+                        System.exit(1);
                     }
                     break;
                 case "set":
                     if (args.length > 1) {
-                        handleSet(args[1]);
+                        int ret = handleSet(args[1]);
+                        if (ret != 0) {
+                            System.exit(2);
+                        }
                     } else {
                         System.err.println("Missing parameter argument for set");
+                        System.exit(1);
                     }
                     break;
                 case "apply_calibrated_profile":
@@ -185,16 +202,18 @@ public class AudioTool {
                 default:
                     System.err.println("Unknown command: " + action);
                     printUsage();
+                    System.exit(1);
                     break;
             }
         } catch (Throwable t) {
             System.err.println("[-] Execution failed: " + t.getMessage());
             t.printStackTrace(System.err);
+            System.exit(3);
         }
     }
 
     private static void printUsage() {
-        System.out.println("TCL T-Chord In-Memory Optimizer Tool (v2.1.0)");
+        System.out.println("TCL T-Chord In-Memory Optimizer Tool (v2.1.1)");
         System.out.println("Usage:");
         System.out.println("  app_process ... AudioTool get <key>");
         System.out.println("  app_process ... AudioTool set <key=value>");
