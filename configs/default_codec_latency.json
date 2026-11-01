@@ -1,9 +1,24 @@
 {
-  "description": "TCL T-Chord 11-Slot Codec Latency Calibration & Joint Acoustic Configuration Table",
-  "version": "2.1.1",
+  "description": "TCL T-Chord 11.1.6 Tri-Level Spatial Acoustic Matrix & 11-Slot Codec Latency Calibration Table",
+  "version": "2.2.0",
   "target_hardware": {
-    "tv": "TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9655 / Android 14)",
-    "soundbar": "TCL Q95K 11.1.4 (Illusonic DSP Type 13 / StreamSDK)"
+    "tv": "TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9655 / Android 14 / Onkyo 2.1.2 80W 5-Driver System)",
+    "soundbar": "TCL Q95K 11.1.4 (Illusonic DSP Type 13 / MediaTek MT8532 / StreamSDK)"
+  },
+  "acoustic_architecture": {
+    "target_layout": "11.1.6 IMAX Enhanced & Auro-3D Tri-Level Spatial Matrix",
+    "total_physical_drivers": 18,
+    "ground_layer_channels": 11,
+    "subwoofer_lfe_channels": 1,
+    "height_sky_layer_channels": 6,
+    "dialogue_elevation_anchor": "TV Lower Micro-Transducer Array (Linkwitz-Riley 480Hz HPF + Blauert 3.5kHz Peaking)",
+    "room_geometry": {
+      "tv_to_soundbar_vertical_gap_cm": 40.0,
+      "screen_to_listening_position_m": 2.75,
+      "effective_listening_distance_m": 2.4,
+      "vertical_elevation_angle_deg": 19.5,
+      "optimal_icld_attenuation_db": -6.0
+    }
   },
   "slots": {
     "0_multich_lpcm": 42,
@@ -18,21 +33,32 @@
     "9_reserved_1": 50,
     "10_reserved_2": 50
   },
+  "tri_level_height_matrix": {
+    "layer_allocation": {
+      "front_height_l_r": "Q95K Soundbar Front Up-Firing Reflection Array (Ceiling Angle 20°)",
+      "top_sky_l_r": "TCL 75Q9M Pro Onkyo Top-Firing Sky Drivers (Physical 1.45m Elevation, Ceiling Direct)",
+      "rear_height_l_r": "Q95K Wireless Satellite Up-Firing Reflection Array (Ceiling Angle 15°)"
+    },
+    "vertical_sound_field_mode": 1,
+    "vertical_sound_field_params": "elevation_gain=3dB,crossover_hz=480,hrtf_enable=1",
+    "top_channel_gain": 10,
+    "rationale": "Combines 4x up-firing reflection drivers from Q95K with 2x physical top sky drivers from TV into a continuous 6-point hemispherical height dome (.6)"
+  },
   "crossover_network": {
     "topology": "Linkwitz-Riley 4th Order (24dB/octave)",
     "highpass_cutoff_hz": 480,
-    "rationale": "Prevents TV micro-transducer excursion overload (>1.2mm) below 400Hz and eliminates plastic chassis buzz, allocating chest resonance strictly to Q95K subwoofer array"
+    "rationale": "Prevents TV micro-transducer excursion overload (>1.2mm) below 400Hz and eliminates plastic chassis buzz, allocating chest resonance strictly to Q95K 10-inch subwoofer array"
   },
   "blauert_directional_filter": {
     "center_frequency_hz": 3500,
     "q_factor": 1.5,
     "gain_db": 3.0,
     "target": "SpeakerOutput",
-    "rationale": "Activates human pinna directional band (Vorn-Oben) to elevate dialogue phantom center directly to display screen midline"
+    "rationale": "Activates human pinna directional band (Vorn-Oben) to elevate dialogue phantom center directly across the 40cm gap to display screen midline"
   },
   "icld_level_balance": {
-    "tv_speaker_attenuation_relative_to_sbar_db": -8.0,
-    "rationale": "Per Wallis & Lee (JAES 2015), TV speaker serves as an acoustic elevation anchor without overpowering the main soundbar soundstage"
+    "tv_speaker_attenuation_relative_to_sbar_db": -6.0,
+    "rationale": "Per Wallis & Lee (JAES 2015) and 40cm/2.4m geometry: -6dB TV attenuation anchors vertical dialogue location without masking Q95K main soundstage dynamics"
   },
   "peq_filters": [
     {

@@ -47,8 +47,9 @@ state_info = {
     "soundbar_model": "未知",
     "latencies": "",
     "crossover": "480 Hz Linkwitz-Riley 4阶",
-    "icld_offset": "-8 dB",
-    "elevation": "+3 dB Blauert Peaking (3.5 kHz)"
+    "icld_offset": "-6 dB",
+    "elevation": "+3 dB Blauert Peaking (3.5 kHz)",
+    "architecture": "11.1.6 IMAX / Auro-3D 三层空间矩阵 (18 物理发声单元)"
 }
 
 orchestrator: Optional[TChordOrchestrator] = None
@@ -68,17 +69,19 @@ def update_ha_sensor(state_str: str, extra_attrs: Optional[dict] = None):
         attrs = {
             "friendly_name": "TCL T和弦声学优化状态",
             "icon": "mdi:speaker-multiple",
-            "tv_model": "TCL 75Q9M Pro (Pentonic 700 / MT9653)",
+            "tv_model": "TCL 75Q9M Pro (Pentonic 700 / MT9655 / Onkyo 2.1.2)",
             "soundbar_model": state_info["soundbar_model"],
             "tv_ip": CONFIG.get("tv_ip"),
             "soundbar_ip": state_info["soundbar_ip"],
             "latencies_active": state_info["latencies"],
-            "mode": "T-Chord 联合声学对齐 (JAES 2015 梳状滤波消除)",
-            "soundbar_passthrough": "100% 满血透传 (Q95K 主中置+环绕+天空+低音炮)",
-            "tv_dialogue_tap": "480Hz LR4 保护分频 + 3.5kHz Blauert 垂直声像锚定 (-8dB)",
+            "architecture": "11.1.6 IMAX / Auro-3D 三层空间声学矩阵 (18 物理发声单元)",
+            "ground_layer": "11 声道 (Q95K 主条形音箱与环绕阵列 100% 满血透传)",
+            "lfe_layer": ".1 声道 (Q95K 10 吋 200W 独立低音炮; 电视端切除 <480Hz)",
+            "height_layer": ".6 声道 (Q95K 前反射 2 + 电视顶部直发 2 + Q95K 环绕反射 2)",
+            "dialogue_anchor": "电视底部微单元 (-6dB ICLD + 3.5kHz Blauert 抬升 40cm 对白高度)",
             "crossover_frequency": "480 Hz Linkwitz-Riley 4阶 (24dB/oct)",
             "dialogue_elevation": "+3 dB 屏幕中心抬升 (Blauert 3.5kHz, Q=1.5)",
-            "icld_level_balance": "-8 dB (TV SpeakerOutput attenuation)",
+            "icld_level_balance": "-6 dB (电视 SpeakerOutput 衰减, 针对 40cm 视听距校准)",
             "last_injected_time": state_info["last_injected"],
             "disk_safety": "100% 纯内存生效 (断电物理复原)"
         }

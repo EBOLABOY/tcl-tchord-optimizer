@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """
-TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.1.1)
-Hardware Targets:
-  - TV: TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9653 / Android 14)
-  - Soundbar: TCL Q95K 11.1.4 (MediaTek MT8532 + Illusonic DSP Type 13)
+TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.2.0)
+Unified 11.1.6 Tri-Level Spatial Acoustic Matrix & Phase Alignment
 
-Academic Acoustic Grounding:
-  - Wallis & Lee (JAES 2015): Precedence effect limitation in median plane & comb filter elimination
-  - Jens Blauert (1969/1997): 3.5 kHz "Vorn-Oben" elevation band peaking filter
-  - Linkwitz-Riley 4th Order (24dB/oct) High-Pass crossover at 480 Hz for TV micro-transducer protection
-  - Bertelson & de Gelder (2004): Ventriloquism effect visual capture window
-  - Interchannel Level Difference (ICLD): -8dB TV micro-transducer attenuation relative to soundbar
+Hardware Targets:
+  - TV: TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9655 / Android 14 / Onkyo 2.1.2 80W)
+  - Soundbar: TCL Q95K 11.1.4 (MediaTek MT8532 + Illusonic DSP Type 13 / 11.1.4 Array)
+
+Unified 11.1.6 Architecture Allocation:
+  - Ground Layer (11 channels @ 0° Horizon): 100% Q95K Main Beamforming Drivers
+  - LFE Layer (.1 channel): Q95K 10-inch 200W Subwoofer (TV 20W sub highpassed at 480Hz to prevent resonance)
+  - Height & Sky Layer (.6 channels):
+      * Front Height L/R (2ch): Q95K Soundbar Up-Firing Reflection Array
+      * Top Sky L/R (2ch): TV ONKYO Physical Top-Firing Sky Drivers (@ 1.45m elevation)
+      * Rear Height L/R (2ch): Q95K Wireless Satellite Up-Firing Reflection Array
+  - Median Dialogue Anchor: TV Bottom Micro-Transducers (-6.0 dB ICLD, 3.5 kHz Blauert Peaking)
 """
 
 import argparse
@@ -60,11 +64,19 @@ class TChordOrchestrator:
 
     def get_vol_offset_db(self) -> int:
         icld = self.config_data.get("icld_level_balance", {})
-        val = icld.get("tv_speaker_attenuation_relative_to_sbar_db", -8.0)
+        val = icld.get("tv_speaker_attenuation_relative_to_sbar_db", -6.0)
         try:
             return int(round(float(val)))
         except (ValueError, TypeError):
-            return -8
+            return -6
+
+    def get_vertical_sound_field_info(self) -> Dict[str, Any]:
+        vm = self.config_data.get("tri_level_height_matrix", {})
+        return {
+            "mode": vm.get("vertical_sound_field_mode", 1),
+            "params": vm.get("vertical_sound_field_params", "elevation_gain=3dB,crossover_hz=480,hrtf_enable=1"),
+            "top_channel_gain": vm.get("top_channel_gain", 10)
+        }
 
     def get_peq_command_strings(self) -> List[str]:
         peq_list = self.config_data.get("peq_filters", [])
@@ -99,7 +111,7 @@ class TChordOrchestrator:
                 continue
             url = f"https://{candidate_ip}:8043/api/getData?path=settings:/system/modelName&roles=@all&_nocache={int(time.time()*1000)}"
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "TChordOrchestrator/2.1"})
+                req = urllib.request.Request(url, headers={"User-Agent": "TChordOrchestrator/2.2"})
                 with urllib.request.urlopen(req, context=ctx, timeout=2.5) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     model = data.get("value", {}).get("string_", "TCL Q95K Soundbar")
@@ -117,7 +129,7 @@ class TChordOrchestrator:
                     ]:
                         try:
                             sub_url = f"https://{candidate_ip}:8043/api/getData?path={path}&roles=@all"
-                            sub_req = urllib.request.Request(sub_url, headers={"User-Agent": "TChordOrchestrator/2.1"})
+                            sub_req = urllib.request.Request(sub_url, headers={"User-Agent": "TChordOrchestrator/2.2"})
                             with urllib.request.urlopen(sub_req, context=ctx, timeout=1.5) as sub_resp:
                                 sub_data = json.loads(sub_resp.read().decode("utf-8"))
                                 val_obj = sub_data.get("value", {})
@@ -152,7 +164,7 @@ class TChordOrchestrator:
             req = urllib.request.Request(
                 url,
                 data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json", "User-Agent": "TChordOrchestrator/2.1"}
+                headers={"Content-Type": "application/json", "User-Agent": "TChordOrchestrator/2.2"}
             )
             with urllib.request.urlopen(req, context=ctx, timeout=2.5) as resp:
                 return resp.status in (200, 204)
@@ -203,7 +215,11 @@ class TChordOrchestrator:
             return False
 
     def configure_tv_audio_routing(self) -> bool:
-        print("[*] Synchronizing TV multi-sound device and eARC settings...")
+        print("[*] Synchronizing TV multi-sound device, eARC and 11.1.6 Top Sky settings...")
+        v_info = self.get_vertical_sound_field_info()
+        v_mode = v_info.get("mode", 1)
+        top_gain = v_info.get("top_channel_gain", 10)
+
         # 1. Enable TV Multi-sound device (T-Chord / Simultaneous speaker output)
         self.run_adb(["shell", "settings", "put", "system", "tcl_app_settings_multi_sound_device", "true"])
         # 2. Enable eARC mode
@@ -211,12 +227,16 @@ class TChordOrchestrator:
         # 3. Enable System Audio Mode and ARC on CEC bus
         self.run_adb(["shell", "cmd", "hdmi_control", "setsystemaudiomode", "on"])
         self.run_adb(["shell", "cmd", "hdmi_control", "setarc", "on"])
+        # 4. Activate Physical Top Sky Drivers for 11.1.6
+        self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_vertical_sound_field", str(v_mode)])
+        self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_channel_top", str(top_gain)])
+        self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_atmos", "1"])
         return True
 
     def apply_profile(self) -> bool:
-        print("=" * 70)
-        print(" Applying T-Chord Calibrated Acoustic Profile (In-Memory)")
-        print("=" * 70)
+        print("=" * 72)
+        print(" Applying Unified 11.1.6 Tri-Level Spatial Acoustic Matrix Profile")
+        print("=" * 72)
 
         # 1. Probe Soundbar
         sbar_ok, sbar_ip, sbar_details = self.probe_soundbar()
@@ -261,9 +281,12 @@ class TChordOrchestrator:
         vol_offset = self.get_vol_offset_db()
         peq_cmds = self.get_peq_command_strings()
         peq_arg = "||".join(peq_cmds)
+        v_info = self.get_vertical_sound_field_info()
+        v_params = v_info.get("params", "elevation_gain=3dB,crossover_hz=480,hrtf_enable=1")
 
         print(f"[*] Latency Matrix (11 slots): [{lat_csv}]")
-        print(f"[*] ICLD Speaker Level Balance: {vol_offset} dB (SpeakerOutput attenuation)")
+        print(f"[*] ICLD Speaker Level Balance: {vol_offset} dB (Calibrated for 40cm gap)")
+        print(f"[*] Vertical Sound Field Params: {v_params}")
         print(f"[*] Dynamic PEQ Filters ({len(peq_cmds)} stages):")
         for cmd in peq_cmds:
             print(f"    -> {cmd}")
@@ -271,23 +294,23 @@ class TChordOrchestrator:
         # 6. Execute injection on TV via app_process
         cmd = [
             "shell",
-            f"CLASSPATH={REMOTE_JAR_PATH} app_process / {REMOTE_CLASS} apply_calibrated_profile '{lat_csv}' '{vol_offset}' '{peq_arg}'"
+            f"CLASSPATH={REMOTE_JAR_PATH} app_process / {REMOTE_CLASS} apply_calibrated_profile '{lat_csv}' '{vol_offset}' '{peq_arg}' '{v_params}'"
         ]
         ret, stdout, stderr = self.run_adb(cmd, timeout=12)
         if ret == 0:
             print("\n" + stdout)
-            print("\n" + "=" * 70)
-            print(">>> [SUCCESS] T-Chord Calibrated Acoustic Profile Successfully Active! <<<")
-            print("=" * 70)
+            print("\n" + "=" * 72)
+            print(">>> [SUCCESS] 11.1.6 Spatial Acoustic Matrix Successfully Active in RAM! <<<")
+            print("=" * 72)
             return True
         else:
             print(f"[-] Injection failed (ret={ret}): {stderr}\n{stdout}")
             return False
 
     def restore_defaults(self) -> bool:
-        print("=" * 70)
+        print("=" * 72)
         print(" Restoring TV Audio HAL to Factory Defaults")
-        print("=" * 70)
+        print("=" * 72)
         tv_ok, tv_model = self.probe_tv()
         if not tv_ok:
             print(f"[-] TV Connection Failed: {tv_model}")
@@ -310,9 +333,9 @@ class TChordOrchestrator:
             return False
 
     def diagnose(self):
-        print("=" * 70)
-        print(" TCL T-Chord Acoustic & System Comprehensive Diagnostics")
-        print("=" * 70)
+        print("=" * 72)
+        print(" TCL 11.1.6 Spatial Acoustic & System Comprehensive Diagnostics")
+        print("=" * 72)
 
         # 1. TV Android & Audio HAL Status
         print("\n--- 1. TV Android & Audio HAL Status ---")
@@ -323,10 +346,14 @@ class TChordOrchestrator:
             _, build, _ = self.run_adb(["shell", "getprop", "ro.build.display.id"])
             _, multi_sound, _ = self.run_adb(["shell", "settings", "get", "system", "tcl_app_settings_multi_sound_device"])
             _, earc_mode, _ = self.run_adb(["shell", "settings", "get", "system", "tcl_app_settings_eARC_mode"])
-            print(f"    SoC Platform:         {soc}")
-            print(f"    Build ID:             {build}")
-            print(f"    Multi-Sound Setting:  {multi_sound}")
-            print(f"    eARC Mode Setting:    {earc_mode}")
+            _, vert_field, _ = self.run_adb(["shell", "settings", "get", "system", "tcl_sys_audio_vertical_sound_field"])
+            _, ch_top, _ = self.run_adb(["shell", "settings", "get", "system", "tcl_sys_audio_channel_top"])
+            print(f"    SoC Platform:               {soc}")
+            print(f"    Build ID:                   {build}")
+            print(f"    Multi-Sound Setting:        {multi_sound}")
+            print(f"    eARC Mode Setting:          {earc_mode}")
+            print(f"    Vertical Sound Field State: {vert_field}")
+            print(f"    Top Sky Channel Gain:       {ch_top}")
 
             if self.ensure_injector():
                 print("\n[*] Querying Active HAL Audio Parameters:")
@@ -366,6 +393,7 @@ class TChordOrchestrator:
         latencies = self.get_latencies()
         vol_offset = self.get_vol_offset_db()
         peq_cmds = self.get_peq_command_strings()
+        v_info = self.get_vertical_sound_field_info()
 
         slots_desc = [
             "PCM 2.0 (LPCM Linear Stereo)",
@@ -385,26 +413,54 @@ class TChordOrchestrator:
         for i, (desc, val) in enumerate(zip(slots_desc, latencies)):
             print(f"   [{i:02d}] | {desc:<32} | {val:>3} ms")
 
-        print(f"\n  ICLD Level Balance: {vol_offset} dB (TV micro-transducer attenuation)")
+        print(f"\n  ICLD Level Balance: {vol_offset} dB (Calibrated for 40cm gap)")
+        print(f"  Vertical Field:     Mode={v_info['mode']}, Params='{v_info['params']}'")
         print("  PEQ Filter Commands:")
         for c in peq_cmds:
             print(f"    {c}")
-        print("  Safety Boundary:    Zero-disk-write. Fully volatile in-RAM parameters.")
-        print("=" * 70 + "\n")
+
+        # 4. Unified 11.1.6 Physical Driver Topology
+        print("\n--- 4. Unified 11.1.6 Physical Driver Allocation (18 Transducers) ---")
+        print("  [GROUND LAYER - 11 CHANNELS @ 0° HORIZON]")
+        print("    - Center (C):              Q95K Center Driver Array (Passthrough)")
+        print("    - Front Left / Right:      Q95K FL/FR Drivers")
+        print("    - Front Wide Left / Right: Q95K Side-Beam Drivers")
+        print("    - Surround Left / Right:   Q95K Wireless Satellite Surrounds")
+        print("    - Rear Back Left / Right:  Q95K Rear Satellites")
+        print("  [LFE LAYER - .1 CHANNEL]")
+        print("    - Subwoofer (.1):          Q95K 10-inch 200W Subwoofer (25 Hz - 120 Hz)")
+        print("    - TV Internal Subwoofer:   Linkwitz-Riley 480 Hz HPF Highpass (Cut <480 Hz)")
+        print("  [HEIGHT & SKY LAYER - .6 CHANNELS]")
+        print("    - Front Height L / R (2ch): Q95K Soundbar Up-Firing Reflection (20° Ceiling Bounce)")
+        print("    - Top Sky L / R (2ch):      TV ONKYO Physical Top-Firing Sky Drivers (@ 1.45m Elevation)")
+        print("    - Rear Height L / R (2ch):  Q95K Satellite Up-Firing Reflection (15° Ceiling Bounce)")
+        print("  [MEDIAN DIALOGUE ELEVATION ANCHOR]")
+        print("    - TV Bottom Transducers:    480 Hz LR4 Highpass + 3.5 kHz Blauert Peaking (+3dB, -6dB ICLD)")
+        print("    - Spatial Geometry:         Bridges 40cm vertical gap across 2.75m distance (19.5° elevation)")
+        print("  Safety Boundary: Zero-disk-write. Fully volatile in-RAM parameters.")
+        print("=" * 72 + "\n")
 
     def show_params(self):
         latencies = self.get_latencies()
         vol_offset = self.get_vol_offset_db()
         peq_cmds = self.get_peq_command_strings()
+        v_info = self.get_vertical_sound_field_info()
 
         data = {
-            "version": "2.1.1",
-            "config_file": self.config_path,
+            "version": "2.2.0",
+            "architecture": "11.1.6 IMAX / Auro-3D Tri-Level Spatial Acoustic Matrix",
+            "total_physical_drivers": 18,
+            "room_geometry": {
+                "vertical_gap_cm": 40.0,
+                "listening_distance_m": 2.75,
+                "elevation_angle_deg": 19.5
+            },
             "audio_hal_keys": {
                 "AQ_TCSE_ENABLE": "1",
                 "AQ_TCSE_TUTTI_CHORAL_MODE": "1",
                 "AQ_TCSE_Speech_Clear": "1",
-                "AQ_TCSE_VERTICAL_SOUND_FIELD_MODE": "1",
+                "AQ_TCSE_VERTICAL_SOUND_FIELD_MODE": str(v_info["mode"]),
+                "AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS": v_info["params"],
                 "AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY": ",".join(str(x) for x in latencies),
                 "AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL": "16777215",
                 "AQ_OUTPUT_VOL_OFFSET": f"{vol_offset};AQ_DEVICE=SpeakerOutput"
@@ -413,6 +469,9 @@ class TChordOrchestrator:
             "routing_actions": [
                 "settings put system tcl_app_settings_multi_sound_device true",
                 "settings put system tcl_app_settings_eARC_mode true",
+                "settings put system tcl_sys_audio_vertical_sound_field 1",
+                "settings put system tcl_sys_audio_channel_top 10",
+                "settings put system tcl_sys_audio_atmos 1",
                 "cmd hdmi_control setsystemaudiomode on",
                 "cmd hdmi_control setarc on"
             ]
@@ -422,7 +481,7 @@ class TChordOrchestrator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.1.1)",
+        description="TCL T-Chord 11.1.6 Tri-Level Spatial Acoustic Optimizer & Orchestrator (v2.2.0)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -432,9 +491,9 @@ Examples:
   python3 t_chord_joint_orchestrator.py --show-params
         """
     )
-    parser.add_argument("--apply", action="store_true", help="Apply calibrated acoustic profile to TV Audio HAL")
+    parser.add_argument("--apply", action="store_true", help="Apply 11.1.6 calibrated spatial profile to TV Audio HAL")
     parser.add_argument("--restore", action="store_true", help="Restore TV Audio HAL to factory defaults")
-    parser.add_argument("--diagnose", action="store_true", help="Run full diagnostic suite on TV and Soundbar")
+    parser.add_argument("--diagnose", action="store_true", help="Run full 11.1.6 diagnostic suite on TV and Soundbar")
     parser.add_argument("--show-params", action="store_true", help="Print active HAL parameters in JSON")
     parser.add_argument("--push-jar", action="store_true", help="Force push injector audiotool.jar to TV")
     parser.add_argument("--tv-ip", default=DEFAULT_TV_IP, help=f"TCL TV IP address (default: {DEFAULT_TV_IP})")

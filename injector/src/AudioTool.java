@@ -6,16 +6,15 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * TCL T-Chord In-Memory Parameter Injector & Audio HAL Tool (v2.1.1)
+ * TCL T-Chord In-Memory Parameter Injector & Audio HAL Tool (v2.2.0)
  *
- * Interacts directly with Android's hidden android.media.AudioSystem via reflection.
- * Fully volatile and non-destructive: zero disk writes, 100% RAM-only.
- *
- * Features & Reliability Safeguards:
- * - Real -8dB ICLD attenuation via AQ_OUTPUT_VOL_OFFSET=<db>;AQ_DEVICE=SpeakerOutput
- * - Dynamic PEQ configuration passed directly from JSON configuration
- * - Bundled AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL to eliminate vendor HAL return code bug
- * - Non-zero exit code (System.exit(2)) on any AudioSystem failure to prevent false positives
+ * Supports 11.1.6 IMAX / Auro-3D Tri-Level Spatial Acoustic Matrix:
+ * - Direct volatile reflection into android.media.AudioSystem
+ * - Multi-band PEQ with cascaded Linkwitz-Riley 4th Order highpass + Blauert 3.5kHz peaking
+ * - ICLD attenuation balance (AQ_OUTPUT_VOL_OFFSET) into MediaTek <APAF> DSP
+ * - Dual Physical Sky Channel activation (AQ_TCSE_VERTICAL_SOUND_FIELD_MODE & PARAMS)
+ * - Bundled SBAR_CHANNEL mask (16777215) to eliminate vendor HAL return code bug
+ * - Non-zero exit code (System.exit(2)) on any failure
  */
 public class AudioTool {
 
@@ -65,12 +64,13 @@ public class AudioTool {
 
     private static void handleApplyCalibratedProfile(String[] args) throws Exception {
         System.out.println("=====================================================");
-        System.out.println(" Applying Calibrated T-Chord Acoustic Profile (RAM)  ");
+        System.out.println(" Applying 11.1.6 Spatial Acoustic Matrix Profile     ");
         System.out.println("=====================================================");
 
         String latencies = "42,58,66,80,84,92,74,54,82,50,50";
-        int volOffsetDb = -8;
+        int volOffsetDb = -6;
         List<String> peqCommands = new ArrayList<>();
+        String verticalFieldParams = "elevation_gain=3dB,crossover_hz=480,hrtf_enable=1";
 
         if (args.length > 1 && args[1] != null && !args[1].trim().isEmpty()) {
             latencies = args[1].trim();
@@ -88,6 +88,9 @@ public class AudioTool {
                 }
             }
         }
+        if (args.length > 4 && args[4] != null && !args[4].trim().isEmpty()) {
+            verticalFieldParams = args[4].trim();
+        }
 
         if (peqCommands.isEmpty()) {
             peqCommands.add("AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=1;Gain=0;Enable=1");
@@ -100,6 +103,7 @@ public class AudioTool {
         commands.add("AQ_TCSE_TUTTI_CHORAL_MODE=1");
         commands.add("AQ_TCSE_Speech_Clear=1");
         commands.add("AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=1");
+        commands.add("AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS=" + verticalFieldParams);
         commands.add("AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY=" + latencies + ";AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL=16777215");
         commands.add("AQ_OUTPUT_VOL_OFFSET=" + volOffsetDb + ";AQ_DEVICE=SpeakerOutput");
         commands.addAll(peqCommands);
@@ -117,7 +121,7 @@ public class AudioTool {
             System.exit(2);
         }
 
-        System.out.println("[+] Calibrated profile successfully loaded into Audio HAL.");
+        System.out.println("[+] 11.1.6 Spatial profile successfully loaded into Audio HAL.");
     }
 
     private static void handleRestoreDefaults() {
@@ -128,7 +132,8 @@ public class AudioTool {
             "AQ_PEQ_PARAM=1;Fc=1000;Type=0;AQ_DEVICE=SpeakerOutput;Q=160;Band=3;Gain=0;Enable=0",
             "AQ_OUTPUT_VOL_OFFSET=0;AQ_DEVICE=SpeakerOutput",
             "AQ_TCSE_Speech_Clear=0",
-            "AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=0"
+            "AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=0",
+            "AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS="
         );
 
         int failCount = 0;
@@ -154,7 +159,9 @@ public class AudioTool {
             "AQ_TCSE_TUTTI_CHORAL_MODE",
             "AQ_TCSE_Speech_Clear",
             "AQ_TCSE_VERTICAL_SOUND_FIELD_MODE",
+            "AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS",
             "AQ_OUTPUT_VOL_OFFSET",
+            "AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY",
             "digital_out_on_off"
         };
         for (String k : keys) {
@@ -213,11 +220,11 @@ public class AudioTool {
     }
 
     private static void printUsage() {
-        System.out.println("TCL T-Chord In-Memory Optimizer Tool (v2.1.1)");
+        System.out.println("TCL T-Chord In-Memory Optimizer Tool (v2.2.0 - 11.1.6 Spatial Matrix)");
         System.out.println("Usage:");
         System.out.println("  app_process ... AudioTool get <key>");
         System.out.println("  app_process ... AudioTool set <key=value>");
-        System.out.println("  app_process ... AudioTool apply_calibrated_profile [latencies_csv] [vol_offset_db] [peq_commands_pipe_delimited]");
+        System.out.println("  app_process ... AudioTool apply_calibrated_profile [latencies_csv] [vol_offset_db] [peq_commands_pipe_delimited] [vertical_sound_field_params]");
         System.out.println("  app_process ... AudioTool restore_defaults");
         System.out.println("  app_process ... AudioTool query_status");
     }
