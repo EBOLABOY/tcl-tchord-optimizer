@@ -24,7 +24,7 @@
                        |          [75吋 4K MiniLED 屏幕]       |
                        |                   |                   |
                        |         [电视底部微单元 (对白锚定)]     |
-                       |           (-6dB ICLD + 3.5kHz)        |
+                       |           (-10dB ICLD + 3.5kHz)       |
                        |                   |                   |
                        |<--------- 垂直间隙 Δh = 40cm -------->|
                        v                   v                   v
@@ -65,7 +65,7 @@
 1. **前部天空 (Front Height L/R, 2 声道)**：由 Q95K 条形音箱前向朝天反射单元发声（天花板倾角 20° 反射）。
 2. **顶中直发天空 (Top Center Sky L/R, 2 声道)**：由 75Q9M Pro 电视顶部的安桥物理扬声器发声（位于 1.45m 高位，直接向天花板垂直喷射）。
    * 通过 MediaTek 底层 HAL 指令 `AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=1` 激活。
-   * 下发参数 `AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS=elevation_gain=3dB,crossover_hz=480,hrtf_enable=1`。
+   * 下发参数 `AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS=elevation_gain=3dB,crossover_hz=480,hrtf_enable=0`（关闭人工 HRTF 虚拟反射，避免与实体房间产生空洞回音）。
 3. **后部天空 (Rear Height L/R, 2 声道)**：由 Q95K 无线后环绕音箱朝天反射单元发声（天花板倾角 15° 反射）。
 
 **听觉效果**：形成“前反射 -> 顶直发 -> 后反射”全覆盖的半球形穹顶包围感，物体从前向后飞过的天空轨迹连续且饱满。
@@ -88,8 +88,10 @@
 
 ### 3.2 科学声学解决方案 (JAES 2015 + Blauert 带)
 本项目利用人类听觉定位的两个生理声学机制完美化解落差：
-1. **通道间声级差（ICLD）微衰减 (-6.0 dB)**：
-   * 根据 Wallis & Lee（JAES 2015）研究，在垂直平面的双声源定位中，只要将高位辅助声源声压级控制在主声源的 $-6\text{ dB} \sim -8\text{ dB}$，主声源（Q95K）依然占领听觉声能主导（消除梳状滤波），而高位辅助声源（电视底部）则提供垂直定位感知拉力。
+1. **通道间声级差（ICLD）精准衰减 (-10.0 dB)**：
+   * 根据 Wallis & Lee（JAES 2015 "The Vertical Haas Effect and Sound Localization"）研究，在 2.4m~2.75m 典型近场视听距离下：
+     * 若仅衰减 $-6\text{ dB}$，电视扬声器声能占比为 25%（感知响度约 50%），人耳在纯净立体声或全景声音乐中极易识破双声源，产生“微弱重音/空洞回音”错觉；
+     * 当将高位辅助声源衰减至 **$-10\text{ dB} \sim -12\text{ dB}$** 时，主声源（Q95K）在声能上彻底占据绝对声学主导（彻底抑制双重听觉分裂），同时 $-10\text{ dB}$ 的高位微弱能量足以在垂直面上提供足够的视觉诱导拉力，实现完全无重音的声像抬升！
 2. **Jens Blauert (1969/1997) 3.5 kHz "Vorn-Oben" 频带抬升**：
    * 人耳耳廓在识别正前上方声源时，对 $3.5\text{ kHz}$ 频段具有天然的共振滤波特性。
    * 通过在电视端 PEQ Band 3 施加 $Fc=3500\text{ Hz}, Q=1.5, \text{Gain}=+3.0\text{ dB}$ 的峰值滤波，激活耳廓前上方定位中枢。
@@ -105,20 +107,20 @@
 ### 4.1 核心注入参数表
 
 ```text
-# 1. 激活 TCSE 协同发声引擎与对白增强
+# 1. 激活 TCSE 协同发声引擎 (关闭 Speech_Clear 人声重影相位调制)
 AQ_TCSE_ENABLE=1
 AQ_TCSE_TUTTI_CHORAL_MODE=1
-AQ_TCSE_Speech_Clear=1
+AQ_TCSE_Speech_Clear=0
 
-# 2. 激活 11.1.6 顶部直发天空声道
+# 2. 激活 11.1.6 顶部直发天空声道 (hrtf_enable=0 抑制人工反射回音)
 AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=1
-AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS=elevation_gain=3dB,crossover_hz=480,hrtf_enable=1
+AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS=elevation_gain=3dB,crossover_hz=480,hrtf_enable=0
 
 # 3. 11 槽位微秒级相位基准注入 (闭合原厂状态机)
 AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY=42,58,66,80,84,92,74,54,82,50,50;AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL=16777215
 
-# 4. 下发 MediaTek <APAF> 硬件声级偏置 (-6dB)
-AQ_OUTPUT_VOL_OFFSET=-6;AQ_DEVICE=SpeakerOutput
+# 4. 下发 MediaTek <APAF> 硬件声级偏置 (-10dB 哈斯效应融合点)
+AQ_OUTPUT_VOL_OFFSET=-10;AQ_DEVICE=SpeakerOutput
 
 # 5. Linkwitz-Riley 4阶 480Hz 高通分频 (Band 1 & 2 Butterworth 级联)
 AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=1;Gain=0;Enable=1
@@ -140,10 +142,28 @@ settings put system tcl_sys_audio_vertical_sound_field 1
 settings put system tcl_sys_audio_channel_top 10
 settings put system tcl_sys_audio_atmos 1
 
+# 彻底禁用电视端 AI 声音内容自适应 (防止后台守护进程突发覆写 DAP GEQ +24dB 破坏声级平衡)
+settings put global tcl_app_settings_ai_audio_visual false
+settings put system tcl_sys_audio_aiaq_adaptive_content 0
+settings put system tcl_sys_audio_sound_mode 1
+
 # CEC 总线开启 System Audio Mode 与 ARC
 cmd hdmi_control setsystemaudiomode on
 cmd hdmi_control setarc on
 ```
+
+### 4.3 “回音感”实机逆向根因诊断与声学消除
+
+在实机杜比全景声音乐监听实测中，曾检测出微弱的“回音感/空洞感”，经深入 `audio_hw_primary` 与 `libthal_audio.so` 反汇编排查，锁定了 **3 个隐蔽根因**：
+1. **电视 AI 智感声音（AIAQ）后台抢占覆盖**：
+   * 电视内部运行有 `AiAq` 声学分类器，在检测到人声时会自动下发 `setDolbySoundMode: Dap set sound mode (News)`，并注入 `Dap set DapGeqBandTarget to -20, 0, 16, 24, 24, 24, -24`（在 1kHz~5kHz 人声频段强行暴增 **+24dB**）。这导致电视喇叭瞬间超越回音壁声压，造成极其突兀的人声双重发声与回音。
+   * **消除方案**：彻底关闭 `tcl_app_settings_ai_audio_visual` 与 `tcl_sys_audio_aiaq_adaptive_content`，恢复平直参考频响。
+2. **虚拟 HRTF 早期反射滤波（hrtf_enable=1）**：
+   * 原生 TCSE 天空算法包含为立体声喇叭模拟高度感而注入的人工房间早期反射延时抽头（Echo taps）。在真实的 2.75 米硬质客厅环境中，这些虚拟反射与物理房间反射叠加，听感即为“发空/回音”。
+   * **消除方案**：设置 `hrtf_enable=0`，使安桥朝天扬声器喷射纯净的直达声波。
+3. **TCSE 人声增强（Speech_Clear=1）动态相位抖动**：
+   * 该算法会对人声共振峰进行动态相位扩宽，导致音乐中的人声与回音壁主中置产生梳状抖动。
+   * **消除方案**：设置 `AQ_TCSE_Speech_Clear=0`，确保两套系统绝对相干同相。
 
 ---
 

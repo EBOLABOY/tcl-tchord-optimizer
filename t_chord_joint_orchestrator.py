@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.2.0)
+TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.2.1)
 Unified 11.1.6 Tri-Level Spatial Acoustic Matrix & Phase Alignment
 
 Hardware Targets:
@@ -64,17 +64,17 @@ class TChordOrchestrator:
 
     def get_vol_offset_db(self) -> int:
         icld = self.config_data.get("icld_level_balance", {})
-        val = icld.get("tv_speaker_attenuation_relative_to_sbar_db", -6.0)
+        val = icld.get("tv_speaker_attenuation_relative_to_sbar_db", -10.0)
         try:
             return int(round(float(val)))
         except (ValueError, TypeError):
-            return -6
+            return -10
 
     def get_vertical_sound_field_info(self) -> Dict[str, Any]:
         vm = self.config_data.get("tri_level_height_matrix", {})
         return {
             "mode": vm.get("vertical_sound_field_mode", 1),
-            "params": vm.get("vertical_sound_field_params", "elevation_gain=3dB,crossover_hz=480,hrtf_enable=1"),
+            "params": vm.get("vertical_sound_field_params", "elevation_gain=3dB,crossover_hz=480,hrtf_enable=0"),
             "top_channel_gain": vm.get("top_channel_gain", 10)
         }
 
@@ -231,6 +231,10 @@ class TChordOrchestrator:
         self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_vertical_sound_field", str(v_mode)])
         self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_channel_top", str(top_gain)])
         self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_atmos", "1"])
+        # 5. Disable TV AI-AQ adaptive content and audio-visual overrides (prevents dynamic DAP +24dB vocal boost echo)
+        self.run_adb(["shell", "settings", "put", "global", "tcl_app_settings_ai_audio_visual", "false"])
+        self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_aiaq_adaptive_content", "0"])
+        self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_sound_mode", "1"])
         return True
 
     def apply_profile(self) -> bool:

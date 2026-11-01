@@ -6,7 +6,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * TCL T-Chord In-Memory Parameter Injector & Audio HAL Tool (v2.2.0)
+ * TCL T-Chord In-Memory Parameter Injector & Audio HAL Tool (v2.2.1)
  *
  * Supports 11.1.6 IMAX / Auro-3D Tri-Level Spatial Acoustic Matrix:
  * - Direct volatile reflection into android.media.AudioSystem
@@ -68,9 +68,9 @@ public class AudioTool {
         System.out.println("=====================================================");
 
         String latencies = "42,58,66,80,84,92,74,54,82,50,50";
-        int volOffsetDb = -6;
+        int volOffsetDb = -10;
         List<String> peqCommands = new ArrayList<>();
-        String verticalFieldParams = "elevation_gain=3dB,crossover_hz=480,hrtf_enable=1";
+        String verticalFieldParams = "elevation_gain=3dB,crossover_hz=480,hrtf_enable=0";
 
         if (args.length > 1 && args[1] != null && !args[1].trim().isEmpty()) {
             latencies = args[1].trim();
@@ -101,7 +101,7 @@ public class AudioTool {
         List<String> commands = new ArrayList<>();
         commands.add("AQ_TCSE_ENABLE=1");
         commands.add("AQ_TCSE_TUTTI_CHORAL_MODE=1");
-        commands.add("AQ_TCSE_Speech_Clear=1");
+        commands.add("AQ_TCSE_Speech_Clear=0");
         commands.add("AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=1");
         commands.add("AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS=" + verticalFieldParams);
         commands.add("AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY=" + latencies + ";AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL=16777215");
@@ -220,7 +220,7 @@ public class AudioTool {
     }
 
     private static void printUsage() {
-        System.out.println("TCL T-Chord In-Memory Optimizer Tool (v2.2.0 - 11.1.6 Spatial Matrix)");
+        System.out.println("TCL T-Chord In-Memory Optimizer Tool (v2.2.1 - 11.1.6 Spatial Matrix)");
         System.out.println("Usage:");
         System.out.println("  app_process ... AudioTool get <key>");
         System.out.println("  app_process ... AudioTool set <key=value>");

@@ -1,6 +1,6 @@
 {
   "description": "TCL T-Chord 11.1.6 Tri-Level Spatial Acoustic Matrix & 11-Slot Codec Latency Calibration Table",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "target_hardware": {
     "tv": "TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9655 / Android 14 / Onkyo 2.1.2 80W 5-Driver System)",
     "soundbar": "TCL Q95K 11.1.4 (Illusonic DSP Type 13 / MediaTek MT8532 / StreamSDK)"
@@ -17,7 +17,7 @@
       "screen_to_listening_position_m": 2.75,
       "effective_listening_distance_m": 2.4,
       "vertical_elevation_angle_deg": 19.5,
-      "optimal_icld_attenuation_db": -6.0
+      "optimal_icld_attenuation_db": -10.0
     }
   },
   "slots": {
@@ -40,9 +40,9 @@
       "rear_height_l_r": "Q95K Wireless Satellite Up-Firing Reflection Array (Ceiling Angle 15°)"
     },
     "vertical_sound_field_mode": 1,
-    "vertical_sound_field_params": "elevation_gain=3dB,crossover_hz=480,hrtf_enable=1",
+    "vertical_sound_field_params": "elevation_gain=3dB,crossover_hz=480,hrtf_enable=0",
     "top_channel_gain": 10,
-    "rationale": "Combines 4x up-firing reflection drivers from Q95K with 2x physical top sky drivers from TV into a continuous 6-point hemispherical height dome (.6)"
+    "rationale": "Combines 4x up-firing reflection drivers from Q95K with 2x physical top sky drivers from TV into a continuous 6-point hemispherical height dome (.6). HRTF reflections disabled (hrtf_enable=0) to prevent room reverberation doubling."
   },
   "crossover_network": {
     "topology": "Linkwitz-Riley 4th Order (24dB/octave)",
@@ -57,8 +57,8 @@
     "rationale": "Activates human pinna directional band (Vorn-Oben) to elevate dialogue phantom center directly across the 40cm gap to display screen midline"
   },
   "icld_level_balance": {
-    "tv_speaker_attenuation_relative_to_sbar_db": -6.0,
-    "rationale": "Per Wallis & Lee (JAES 2015) and 40cm/2.4m geometry: -6dB TV attenuation anchors vertical dialogue location without masking Q95K main soundstage dynamics"
+    "tv_speaker_attenuation_relative_to_sbar_db": -10.0,
+    "rationale": "Per Wallis & Lee (JAES 2015) and 40cm/2.4m geometry: -10dB TV attenuation provides optimal subliminal phantom image height elevation without perceptible dual-source voice doubling or slapback echo"
   },
   "peq_filters": [
     {
