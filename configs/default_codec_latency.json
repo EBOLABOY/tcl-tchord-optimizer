@@ -1,6 +1,6 @@
 {
   "description": "TCL T-Chord 11-Slot Codec Latency Calibration & Joint Acoustic Configuration Table",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "target_hardware": {
     "tv": "TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9655 / Android 14)",
     "soundbar": "TCL Q95K 11.1.4 (Illusonic DSP Type 13 / StreamSDK)"

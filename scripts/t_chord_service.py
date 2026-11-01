@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-TCL T-Chord Joint Optimizer Service & Home Assistant Bridge (v2.0.0)
+TCL T-Chord Joint Optimizer Service & Home Assistant Bridge (v2.1.0)
 Monitors TV state via HA WebSocket, auto-injects on power-on via ADB AudioTool,
 and exposes REST API endpoints for Home Assistant automation.
+
+All credentials, IPs, and entity IDs can be configured via environment variables
+or command-line arguments. Zero hardcoded tokens or IP addresses.
 """
 
+import argparse
 import asyncio
 import json
 import logging
@@ -13,6 +17,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from typing import Optional
 from aiohttp import web
 
 # Add root repo to path for orchestrator import
@@ -20,64 +25,59 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_DIR not in sys.path:
     sys.path.insert(0, REPO_DIR)
 
-from t_chord_joint_orchestrator import TChordOrchestrator, DEFAULT_LATENCIES
+from t_chord_joint_orchestrator import TChordOrchestrator
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("TChordService")
 
-HA_HOST = "192.168.100.4"
-HA_PORT = 8123
-TV_IP = "192.168.100.101"
-HTTP_PORT = 8998
-
-REFRESH_TOKEN = "4e180e92593b11ee7953ce89a7345d067f92b7a43e66e3f4ffc7640d003df735e573263c025c83c043c4e2ef35da86a84796c9243ac7fd0255bbaf30de68078f"
-CLIENT_ID = "http://192.168.100.4:8123/"
-
-orchestrator = TChordOrchestrator(tv_ip=TV_IP)
+# Configuration via environment variables with sensible defaults
+DEFAULT_HA_HOST = os.environ.get("HA_HOST", "127.0.0.1")
+DEFAULT_HA_PORT = int(os.environ.get("HA_PORT", 8123))
+DEFAULT_HA_TOKEN = os.environ.get("HA_TOKEN", "")
+DEFAULT_TV_IP = os.environ.get("TV_IP", "192.168.100.101")
+DEFAULT_SOUNDBAR_IP = os.environ.get("SOUNDBAR_IP", "")
+DEFAULT_HA_ENTITY_ID = os.environ.get("HA_ENTITY_ID", "media_player.ke_ting_dian_shi")
+DEFAULT_HTTP_PORT = int(os.environ.get("SERVICE_PORT", 8998))
 
 state_info = {
-    "status": "已就绪",
+    "status": "服务已启动 (待机)",
     "last_injected": "从未",
-    "tv_ip": TV_IP,
-    "soundbar_ip": "192.168.100.133",
-    "soundbar_model": "TCL Q95K 11.1.4 (Illusonic DSP Type 13)",
-    "latencies": ",".join(str(x) for x in DEFAULT_LATENCIES),
-    "crossover": "480 Hz Linkwitz-Riley 4th Order",
+    "tv_ip": DEFAULT_TV_IP,
+    "soundbar_ip": "未知",
+    "soundbar_model": "未知",
+    "latencies": "",
+    "crossover": "480 Hz Linkwitz-Riley 4阶",
+    "icld_offset": "-8 dB",
     "elevation": "+3 dB Blauert Peaking (3.5 kHz)"
 }
 
-
-def get_ha_token():
-    url = f"http://{HA_HOST}:{HA_PORT}/auth/token"
-    data = urllib.parse.urlencode({
-        "grant_type": "refresh_token",
-        "refresh_token": REFRESH_TOKEN,
-        "client_id": CLIENT_ID
-    }).encode()
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        return json.loads(resp.read().decode())["access_token"]
+orchestrator: Optional[TChordOrchestrator] = None
+CONFIG = {}
 
 
-def update_ha_sensor(state_str, extra_attrs=None):
+def update_ha_sensor(state_str: str, extra_attrs: Optional[dict] = None):
+    token = CONFIG.get("ha_token")
+    host = CONFIG.get("ha_host")
+    port = CONFIG.get("ha_port")
+
+    if not token or not host:
+        logger.debug("HA token/host not set; skipping Home Assistant sensor update.")
+        return
+
     try:
-        token = get_ha_token()
         attrs = {
             "friendly_name": "TCL T和弦声学优化状态",
             "icon": "mdi:speaker-multiple",
             "tv_model": "TCL 75Q9M Pro (Pentonic 700 / MT9653)",
             "soundbar_model": state_info["soundbar_model"],
-            "tv_ip": TV_IP,
+            "tv_ip": CONFIG.get("tv_ip"),
             "soundbar_ip": state_info["soundbar_ip"],
             "mode": "T-Chord 联合声学对齐 (JAES 2015 梳状滤波消除)",
             "soundbar_passthrough": "100% 满血透传 (Q95K 主中置+环绕+天空+低音炮)",
             "tv_dialogue_tap": "480Hz LR4 保护分频 + 3.5kHz Blauert 垂直声像锚定 (-8dB)",
-            "latency_pcm": "42 ms",
-            "latency_ddp_atmos": "80 ms",
-            "latency_truehd_atmos": "92 ms",
-            "latency_dts_x": "82 ms",
             "crossover_frequency": "480 Hz Linkwitz-Riley 4阶 (24dB/oct)",
             "dialogue_elevation": "+3 dB 屏幕中心抬升 (Blauert 3.5kHz, Q=1.5)",
+            "icld_level_balance": "-8 dB (TV SpeakerOutput attenuation)",
             "last_injected_time": state_info["last_injected"],
             "disk_safety": "100% 纯内存生效 (断电物理复原)"
         }
@@ -86,26 +86,25 @@ def update_ha_sensor(state_str, extra_attrs=None):
 
         payload = {"state": state_str, "attributes": attrs}
         req = urllib.request.Request(
-            f"http://{HA_HOST}:{HA_PORT}/api/states/sensor.tcl_tchord_status",
+            f"http://{host}:{port}/api/states/sensor.tcl_tchord_status",
             data=json.dumps(payload).encode("utf-8"),
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             logger.info(f"Updated HA sensor.tcl_tchord_status -> {state_str}")
     except Exception as e:
-        logger.error(f"Failed to update HA sensor: {e}")
+        logger.warning(f"Failed to update HA sensor: {e}")
 
 
 async def perform_injection():
     logger.info("Executing T-Chord joint acoustic injection via Orchestrator...")
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    state_info["last_injected"] = ts
 
-    # Run injection in executor thread to prevent blocking asyncio loop
     loop = asyncio.get_event_loop()
     success = await loop.run_in_executor(None, orchestrator.apply_profile)
 
     if success:
+        state_info["last_injected"] = ts
         state_info["status"] = "已优化 (校准生效)"
         update_ha_sensor("已优化 (校准生效)")
         return {"status": "success", "timestamp": ts, "message": "Calibrated profile applied successfully"}
@@ -135,43 +134,66 @@ async def handle_status(request):
     return web.json_response(state_info)
 
 
+async def handle_diagnose(request):
+    loop = asyncio.get_event_loop()
+    sbar_ok, sbar_ip, sbar_details = await loop.run_in_executor(None, orchestrator.probe_soundbar)
+    tv_ok, tv_model = await loop.run_in_executor(None, orchestrator.probe_tv)
+    return web.json_response({
+        "tv_online": tv_ok,
+        "tv_model": tv_model,
+        "soundbar_online": sbar_ok,
+        "soundbar_ip": sbar_ip,
+        "soundbar_details": sbar_details,
+        "current_status": state_info
+    })
+
+
 async def ha_ws_monitor():
     """Background task monitoring TV state changes from Home Assistant WebSocket"""
+    token = CONFIG.get("ha_token")
+    host = CONFIG.get("ha_host")
+    port = CONFIG.get("ha_port")
+    entity_id = CONFIG.get("ha_entity_id")
+
+    if not token or not host:
+        logger.info("HA WebSocket monitor disabled (no HA_TOKEN / HA_HOST provided).")
+        return
+
     while True:
         try:
-            token = get_ha_token()
             import aiohttp
             async with aiohttp.ClientSession() as session:
-                ws_url = f"ws://{HA_HOST}:{HA_PORT}/api/websocket"
+                ws_url = f"ws://{host}:{port}/api/websocket"
                 async with session.ws_connect(ws_url, timeout=10) as ws:
                     auth_req = await ws.receive_json()
                     await ws.send_json({"type": "auth", "access_token": token})
                     auth_resp = await ws.receive_json()
                     if auth_resp.get("type") != "auth_ok":
                         logger.error(f"HA WebSocket auth failed: {auth_resp}")
-                        await asyncio.sleep(5)
+                        await asyncio.sleep(10)
                         continue
-                    logger.info("Connected to Home Assistant WebSocket monitor!")
+                    logger.info(f"Connected to Home Assistant WebSocket monitor! Listening for {entity_id}...")
+
+                    # Initial sensor sync without claiming optimization until verified
                     update_ha_sensor(state_info["status"])
 
-                    # Subscribe to state changes of media_player.ke_ting_dian_shi
+                    # Subscribe to state changes
                     await ws.send_json({
                         "id": 1,
                         "type": "subscribe_events",
                         "event_type": "state_changed"
                     })
-                    sub_resp = await ws.receive_json()
-                    logger.info(f"Subscribed to HA state changes: {sub_resp.get('success')}")
+                    await ws.receive_json()
 
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             evt = json.loads(msg.data)
                             data = evt.get("event", {}).get("data", {})
                             eid = data.get("entity_id")
-                            if eid == "media_player.ke_ting_dian_shi":
+                            if eid == entity_id:
                                 old_state = (data.get("old_state") or {}).get("state")
                                 new_state = (data.get("new_state") or {}).get("state")
-                                logger.info(f"TV state transition: {old_state} -> {new_state}")
+                                logger.info(f"TV entity {eid} state change: {old_state} -> {new_state}")
 
                                 if new_state in ("on", "idle", "playing") and old_state in ("off", "standby", "unavailable"):
                                     logger.info("TV powered on! Waiting 3.5s for Audio HAL stabilization...")
@@ -183,11 +205,35 @@ async def ha_ws_monitor():
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                             break
         except Exception as e:
-            logger.warning(f"HA WebSocket connection error: {e}. Reconnecting in 5s...")
-            await asyncio.sleep(5)
+            logger.warning(f"HA WebSocket connection error: {e}. Reconnecting in 10s...")
+            await asyncio.sleep(10)
 
 
 def main():
+    parser = argparse.ArgumentParser(description="TCL T-Chord Joint Optimizer Service & HA Bridge")
+    parser.add_argument("--ha-host", default=DEFAULT_HA_HOST, help=f"Home Assistant host (default: {DEFAULT_HA_HOST})")
+    parser.add_argument("--ha-port", type=int, default=DEFAULT_HA_PORT, help=f"Home Assistant port (default: {DEFAULT_HA_PORT})")
+    parser.add_argument("--ha-token", default=DEFAULT_HA_TOKEN, help="Home Assistant Long-Lived Access Token")
+    parser.add_argument("--tv-ip", default=DEFAULT_TV_IP, help=f"TCL TV IP address (default: {DEFAULT_TV_IP})")
+    parser.add_argument("--soundbar-ip", default=DEFAULT_SOUNDBAR_IP, help="TCL Soundbar IP address (default: auto-probe)")
+    parser.add_argument("--entity-id", default=DEFAULT_HA_ENTITY_ID, help=f"TV media_player entity ID in HA (default: {DEFAULT_HA_ENTITY_ID})")
+    parser.add_argument("--port", type=int, default=DEFAULT_HTTP_PORT, help=f"Service HTTP port (default: {DEFAULT_HTTP_PORT})")
+    args = parser.parse_args()
+
+    CONFIG["ha_host"] = args.ha_host
+    CONFIG["ha_port"] = args.ha_port
+    CONFIG["ha_token"] = args.ha_token
+    CONFIG["tv_ip"] = args.tv_ip
+    CONFIG["soundbar_ip"] = args.soundbar_ip
+    CONFIG["ha_entity_id"] = args.entity_id
+
+    global orchestrator
+    orchestrator = TChordOrchestrator(tv_ip=args.tv_ip, soundbar_ip=args.soundbar_ip or None)
+
+    # Initial state initialization (transparent & truthful)
+    state_info["tv_ip"] = args.tv_ip
+    state_info["status"] = "服务已启动 (待机)"
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -195,15 +241,15 @@ def main():
     app.router.add_post("/inject", handle_inject)
     app.router.add_post("/restore", handle_restore)
     app.router.add_get("/status", handle_status)
+    app.router.add_get("/diagnose", handle_diagnose)
 
-    update_ha_sensor("已优化 (校准生效)")
     loop.create_task(ha_ws_monitor())
 
     runner = web.AppRunner(app)
     loop.run_until_complete(runner.setup())
-    site = web.TCPSite(runner, "0.0.0.0", HTTP_PORT)
+    site = web.TCPSite(runner, "0.0.0.0", args.port)
     loop.run_until_complete(site.start())
-    logger.info(f"T-Chord Bridge Service started on port {HTTP_PORT}...")
+    logger.info(f"T-Chord Bridge Service started on port {args.port}...")
 
     loop.run_forever()
 

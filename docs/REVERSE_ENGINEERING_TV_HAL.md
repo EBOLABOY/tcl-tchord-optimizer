@@ -109,7 +109,21 @@ e7884: bl  free                ; 释放临时缓冲区
 
 ---
 
-### 3.5 完整的 TCSE 驱动参数全景表
+### 3.5 电视内置扬声器声级衰减控制 (`AQ_OUTPUT_VOL_OFFSET` 与 ICLD)
+
+为了实现学术声学证明的 -8dB 通道声级差（ICLD），逆向审计 `_Z23utils_set_output_volumeP16mtk_audio_deviceP9str_parms`（代码偏移 `0x94520`–`0x94850`）发现：
+
+* **底层实现原理**：
+  `AQ_OUTPUT_VOL_OFFSET` 接收整数分贝差，并由 `AQ_DEVICE` 指定目标输出。
+  ```text
+  AQ_OUTPUT_VOL_OFFSET=-8;AQ_DEVICE=SpeakerOutput
+  ```
+* **底层驱动执行流水线**：
+  在反汇编中，HAL 将该参数转换为 MediaTek `<APAF>` 架构指令 `_MI_LAPAF_FILTER_VOLUME_SetAudioVolParam`，直接下发到通道类型 `(21, SPEAKER) => Path: (0x34, T3_PATH_I2S)`，在底层硬件 DSP 上瞬间完成 -8dB 物理衰减，完全无需修改 Android 上层音频流的主音量。
+
+---
+
+### 3.6 完整的 TCSE 驱动参数全景表
 
 ```
 ┌──────────────────────────────────────┬─────────────┬────────────────────────────────────────────────────────┐
@@ -118,7 +132,8 @@ e7884: bl  free                ; 释放临时缓冲区
 │ AQ_TCSE_ENABLE                       │ 0 / 1       │ TCL TCSE (TCL Sound Enhancement) 总引擎开关            │
 │ AQ_TCSE_TUTTI_CHORAL_MODE            │ 0 / 1       │ T和弦协同发声模式总开关                                 │
 │ AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY    │ 逗号分隔数组│ 回音壁各音频编码器 11 槽位时延微调表 (ms)               │
-│ AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL    │ 整数掩码    │ 回音壁物理声道分工控制                                  │
+│ AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL    │ 整数掩码    │ 回音壁物理声道分工控制 (传 16777215 可闭合状态机)      │
+│ AQ_OUTPUT_VOL_OFFSET                 │ 整数 (dB)   │ 物理扬声器输出增益偏置 (配合 AQ_DEVICE=SpeakerOutput)   │
 │ AQ_TCSE_Speech_Clear                 │ 0 / 1 / 2   │ TCSE 人声对白清晰度硬件 DSP 增强 (直通对白提取算法)     │
 │ AQ_TCSE_VERTICAL_SOUND_FIELD_MODE    │ 0 / 1       │ 垂直声场高度虚拟化模式                                  │
 │ AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS  │ 格式串      │ 垂直声场提升增益与 HRTF 滤镜控制                        │

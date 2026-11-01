@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.0.0)
+TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.1.0)
 Hardware Targets:
-  - TV: TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9653, Android 14)
+  - TV: TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9653 / Android 14)
   - Soundbar: TCL Q95K 11.1.4 (MediaTek MT8532 + Illusonic DSP Type 13)
 
 Academic Acoustic Grounding:
@@ -10,6 +10,7 @@ Academic Acoustic Grounding:
   - Jens Blauert (1969/1997): 3.5 kHz "Vorn-Oben" elevation band peaking filter
   - Linkwitz-Riley 4th Order (24dB/oct) High-Pass crossover at 480 Hz for TV micro-transducer protection
   - Bertelson & de Gelder (2004): Ventriloquism effect visual capture window
+  - Interchannel Level Difference (ICLD): -8dB TV micro-transducer attenuation relative to soundbar
 """
 
 import argparse
@@ -20,7 +21,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG_PATH = os.path.join(SCRIPT_DIR, "configs", "default_codec_latency.json")
@@ -28,7 +29,6 @@ INJECTOR_JAR_PATH = os.path.join(SCRIPT_DIR, "injector", "bin", "audiotool.jar")
 
 DEFAULT_TV_IP = "192.168.100.101"
 DEFAULT_SOUNDBAR_CANDIDATES = ["192.168.100.133", "192.168.100.134"]
-DEFAULT_LATENCIES = [42, 58, 66, 80, 84, 92, 74, 54, 82, 50, 50]
 REMOTE_JAR_PATH = "/data/local/tmp/audiotool.jar"
 REMOTE_CLASS = "com.tcl.tchord.optimizer.AudioTool"
 
@@ -40,7 +40,7 @@ class TChordOrchestrator:
         self.config_path = config_path or DEFAULT_CONFIG_PATH
         self.config_data = self._load_config()
 
-    def _load_config(self) -> Dict:
+    def _load_config(self) -> Dict[str, Any]:
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
@@ -54,29 +54,84 @@ class TChordOrchestrator:
         if slots:
             values = list(slots.values())[:11]
             if len(values) == 11:
-                return values
-        return DEFAULT_LATENCIES
+                return [int(v) for v in values]
+        return [42, 58, 66, 80, 84, 92, 74, 54, 82, 50, 50]
 
-    def probe_soundbar(self, ip: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+    def get_vol_offset_db(self) -> int:
+        icld = self.config_data.get("icld_level_balance", {})
+        val = icld.get("tv_speaker_attenuation_relative_to_sbar_db", -8.0)
+        try:
+            return int(round(float(val)))
+        except (ValueError, TypeError):
+            return -8
+
+    def get_peq_command_strings(self) -> List[str]:
+        peq_list = self.config_data.get("peq_filters", [])
+        commands = []
+        if peq_list:
+            for p in peq_list:
+                band = p.get("band", 1)
+                fc = p.get("fc", 480)
+                ptype = p.get("type", 2)
+                device = p.get("device", "SpeakerOutput")
+                q = p.get("q", 71)
+                gain = p.get("gain", 0)
+                commands.append(f"AQ_PEQ_PARAM=1;Fc={fc};Type={ptype};AQ_DEVICE={device};Q={q};Band={band};Gain={gain};Enable=1")
+        else:
+            commands = [
+                "AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=1;Gain=0;Enable=1",
+                "AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=2;Gain=0;Enable=1",
+                "AQ_PEQ_PARAM=1;Fc=3500;Type=0;AQ_DEVICE=SpeakerOutput;Q=150;Band=3;Gain=3;Enable=1"
+            ]
+        return commands
+
+    def probe_soundbar(self, ip: Optional[str] = None) -> Tuple[bool, Optional[str], Dict[str, Any]]:
         candidates = [ip] if ip else ([self.soundbar_ip] if self.soundbar_ip else DEFAULT_SOUNDBAR_CANDIDATES)
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+
+        details: Dict[str, Any] = {}
 
         for candidate_ip in candidates:
             if not candidate_ip:
                 continue
             url = f"https://{candidate_ip}:8043/api/getData?path=settings:/system/modelName&roles=@all&_nocache={int(time.time()*1000)}"
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "TChordOrchestrator/2.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "TChordOrchestrator/2.1"})
                 with urllib.request.urlopen(req, context=ctx, timeout=2.5) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     model = data.get("value", {}).get("string_", "TCL Q95K Soundbar")
                     self.soundbar_ip = candidate_ip
-                    return True, candidate_ip, model
+                    details["model"] = model
+                    details["ip"] = candidate_ip
+
+                    # Query additional runtime properties
+                    for key, path in [
+                        ("dsp_type", "settings:/illusonic/soundbarType"),
+                        ("lipsync_ms", "settings:/imx8AudioFramework/lipSyncConf"),
+                        ("volume", "player:volume"),
+                        ("mute", "settings:/mediaPlayer/mute")
+                    ]:
+                        try:
+                            sub_url = f"https://{candidate_ip}:8043/api/getData?path={path}&roles=@all"
+                            sub_req = urllib.request.Request(sub_url, headers={"User-Agent": "TChordOrchestrator/2.1"})
+                            with urllib.request.urlopen(sub_req, context=ctx, timeout=1.5) as sub_resp:
+                                sub_data = json.loads(sub_resp.read().decode("utf-8"))
+                                val_obj = sub_data.get("value", {})
+                                if "i32_" in val_obj:
+                                    details[key] = val_obj["i32_"]
+                                elif "bool_" in val_obj:
+                                    details[key] = val_obj["bool_"]
+                                else:
+                                    details[key] = val_obj
+                        except Exception:
+                            pass
+
+                    return True, candidate_ip, details
             except Exception:
                 continue
-        return False, None, None
+        return False, None, {}
 
     def run_adb(self, cmd_args: List[str], timeout: int = 10) -> Tuple[int, str, str]:
         cmd = ["adb", "-s", f"{self.tv_ip}:5555"] + cmd_args
@@ -91,7 +146,6 @@ class TChordOrchestrator:
             return -3, "", str(e)
 
     def probe_tv(self) -> Tuple[bool, str]:
-        # Test connection
         subprocess.run(["adb", "connect", f"{self.tv_ip}:5555"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
         ret, stdout, stderr = self.run_adb(["shell", "getprop", "ro.product.model"])
         if ret == 0 and stdout:
@@ -117,17 +171,37 @@ class TChordOrchestrator:
             print(f"[-] Failed to push injector: {stderr}")
             return False
 
+    def configure_tv_audio_routing(self) -> bool:
+        print("[*] Synchronizing TV multi-sound device and eARC settings...")
+        # 1. Enable TV Multi-sound device (T-Chord / Simultaneous speaker output)
+        self.run_adb(["shell", "settings", "put", "system", "tcl_app_settings_multi_sound_device", "true"])
+        # 2. Enable eARC mode
+        self.run_adb(["shell", "settings", "put", "system", "tcl_app_settings_eARC_mode", "true"])
+        # 3. Enable System Audio Mode and ARC on CEC bus
+        self.run_adb(["shell", "cmd", "hdmi_control", "setsystemaudiomode", "on"])
+        self.run_adb(["shell", "cmd", "hdmi_control", "setarc", "on"])
+        return True
+
     def apply_profile(self) -> bool:
-        print("=" * 68)
+        print("=" * 70)
         print(" Applying T-Chord Calibrated Acoustic Profile (In-Memory)")
-        print("=" * 68)
+        print("=" * 70)
 
         # 1. Probe Soundbar
-        sbar_ok, sbar_ip, sbar_model = self.probe_soundbar()
+        sbar_ok, sbar_ip, sbar_details = self.probe_soundbar()
         if sbar_ok:
-            print(f"[+] Soundbar Detected: {sbar_model} at {sbar_ip}:8043 (eARC Master)")
+            model = sbar_details.get("model", "Q95K")
+            dsp_type = sbar_details.get("dsp_type", 13)
+            lipsync = sbar_details.get("lipsync_ms", 0)
+            vol = sbar_details.get("volume", "N/A")
+            print(f"[+] Soundbar Connected: {model} at {sbar_ip}:8043")
+            print(f"    Illusonic DSP Profile: Type {dsp_type} (11.1.4 Array) | Volume: {vol}")
+            if lipsync != 0:
+                print(f"[!] WARNING: Soundbar lipSyncConf is set to {lipsync} ms!")
+                print("    For exact T-Chord alignment, soundbar internal delay should be 0ms.")
         else:
-            print("[!] Soundbar probe did not respond on local HTTPS. Continuing with TV HAL calibration...")
+            print("[!] Soundbar probe did not respond on local HTTPS.")
+            print("    Please ensure TV is connected to Soundbar via HDMI eARC Port 1.")
 
         # 2. Probe TV
         tv_ok, tv_model = self.probe_tv()
@@ -137,36 +211,46 @@ class TChordOrchestrator:
             return False
         print(f"[+] TV Connected: {tv_model} ({self.tv_ip})")
 
-        # 3. Ensure injector
+        # 3. Synchronize TV HDMI-CEC & Multi-sound routing
+        self.configure_tv_audio_routing()
+
+        # 4. Ensure injector
         if not self.ensure_injector():
             return False
 
-        # 4. Execute calibrated profile
+        # 5. Extract configuration dynamically from JSON
         latencies = self.get_latencies()
         lat_csv = ",".join(str(x) for x in latencies)
-        print(f"[*] Calibrated 11-Slot Latencies: [{lat_csv}]")
-        print("[*] Acoustic Crossover: 480 Hz Linkwitz-Riley 4th Order (24dB/oct)")
-        print("[*] Height Anchor Filter: 3.5 kHz Blauert Peaking (+3 dB, Q=1.5)")
+        vol_offset = self.get_vol_offset_db()
+        peq_cmds = self.get_peq_command_strings()
+        peq_arg = "||".join(peq_cmds)
 
+        print(f"[*] Latency Matrix (11 slots): [{lat_csv}]")
+        print(f"[*] ICLD Speaker Level Balance: {vol_offset} dB (SpeakerOutput attenuation)")
+        print(f"[*] Dynamic PEQ Filters ({len(peq_cmds)} stages):")
+        for cmd in peq_cmds:
+            print(f"    -> {cmd}")
+
+        # 6. Execute injection on TV via app_process
         cmd = [
             "shell",
-            f"CLASSPATH={REMOTE_JAR_PATH} app_process / {REMOTE_CLASS} apply_calibrated_profile {lat_csv}"
+            f"CLASSPATH={REMOTE_JAR_PATH} app_process / {REMOTE_CLASS} apply_calibrated_profile '{lat_csv}' '{vol_offset}' '{peq_arg}'"
         ]
         ret, stdout, stderr = self.run_adb(cmd, timeout=12)
         if ret == 0:
-            print(stdout)
-            print("\n" + "=" * 68)
+            print("\n" + stdout)
+            print("\n" + "=" * 70)
             print(">>> [SUCCESS] T-Chord Calibrated Acoustic Profile Successfully Active! <<<")
-            print("=" * 68)
+            print("=" * 70)
             return True
         else:
             print(f"[-] Injection failed: {stderr}\n{stdout}")
             return False
 
     def restore_defaults(self) -> bool:
-        print("=" * 68)
+        print("=" * 70)
         print(" Restoring TV Audio HAL to Factory Defaults")
-        print("=" * 68)
+        print("=" * 70)
         tv_ok, tv_model = self.probe_tv()
         if not tv_ok:
             print(f"[-] TV Connection Failed: {tv_model}")
@@ -189,21 +273,24 @@ class TChordOrchestrator:
             return False
 
     def diagnose(self):
-        print("=" * 68)
+        print("=" * 70)
         print(" TCL T-Chord Acoustic & System Comprehensive Diagnostics")
-        print("=" * 68)
+        print("=" * 70)
 
-        # 1. TV ADB Check
+        # 1. TV Android & Audio HAL Status
         print("\n--- 1. TV Android & Audio HAL Status ---")
         tv_ok, tv_model = self.probe_tv()
         if tv_ok:
             print(f"[+] TV ADB: ONLINE (Model: {tv_model})")
-            ret, soc, _ = self.run_adb(["shell", "getprop", "ro.board.platform"])
-            ret2, build, _ = self.run_adb(["shell", "getprop", "ro.build.display.id"])
-            print(f"    SoC Platform: {soc}")
-            print(f"    Build ID:     {build}")
+            _, soc, _ = self.run_adb(["shell", "getprop", "ro.board.platform"])
+            _, build, _ = self.run_adb(["shell", "getprop", "ro.build.display.id"])
+            _, multi_sound, _ = self.run_adb(["shell", "settings", "get", "system", "tcl_app_settings_multi_sound_device"])
+            _, earc_mode, _ = self.run_adb(["shell", "settings", "get", "system", "tcl_app_settings_eARC_mode"])
+            print(f"    SoC Platform:         {soc}")
+            print(f"    Build ID:             {build}")
+            print(f"    Multi-Sound Setting:  {multi_sound}")
+            print(f"    eARC Mode Setting:    {earc_mode}")
 
-            # AudioTool query
             if self.ensure_injector():
                 print("\n[*] Querying Active HAL Audio Parameters:")
                 ret, stdout, _ = self.run_adb(["shell", f"CLASSPATH={REMOTE_JAR_PATH} app_process / {REMOTE_CLASS} query_status"])
@@ -212,29 +299,37 @@ class TChordOrchestrator:
         else:
             print(f"[-] TV ADB: OFFLINE ({tv_model})")
 
-        # 2. Soundbar StreamSDK Check
-        print("\n--- 2. Q95K Soundbar & Illusonic DSP Status ---")
-        sbar_ok, sbar_ip, sbar_model = self.probe_soundbar()
+        # 2. Q95K Soundbar & HDMI-CEC Status
+        print("\n--- 2. Q95K Soundbar & HDMI-CEC Link Status ---")
+        sbar_ok, sbar_ip, sbar_details = self.probe_soundbar()
         if sbar_ok:
-            print(f"[+] Soundbar: ONLINE ({sbar_model}) at https://{sbar_ip}:8043")
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            try:
-                url = f"https://{sbar_ip}:8043/api/getData?path=settings:/illusonic/soundbarType&roles=@all"
-                req = urllib.request.Request(url, headers={"User-Agent": "TChordOrchestrator/2.0"})
-                with urllib.request.urlopen(req, context=ctx, timeout=2.5) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    sb_type = data.get("value", {}).get("i32_", "N/A")
-                    print(f"    Illusonic DSP Profile Type: {sb_type} (Q95K 11.1.4 Array)")
-            except Exception as e:
-                print(f"    Illusonic DSP query: {e}")
+            model = sbar_details.get("model", "Q95K")
+            dsp_type = sbar_details.get("dsp_type", "13")
+            lipsync = sbar_details.get("lipsync_ms", "0")
+            vol = sbar_details.get("volume", "N/A")
+            mute = sbar_details.get("mute", "false")
+            print(f"[+] Soundbar REST API: ONLINE ({model}) at https://{sbar_ip}:8043")
+            print(f"    Illusonic DSP Profile: Type {dsp_type} (Q95K 11.1.4 Array)")
+            print(f"    Current Volume:        {vol}")
+            print(f"    Mute State:            {mute}")
+            print(f"    Internal LipSync:      {lipsync} ms")
         else:
-            print(f"[-] Soundbar: OFFLINE (Probed candidates: {DEFAULT_SOUNDBAR_CANDIDATES})")
+            print(f"[-] Soundbar REST API: OFFLINE (Probed candidates: {DEFAULT_SOUNDBAR_CANDIDATES})")
 
-        # 3. Acoustic Theoretical Summary
-        print("\n--- 3. Acoustic & Mathematical Configuration ---")
+        # Check TV HDMI-CEC Dump
+        if tv_ok:
+            _, cec_dump, _ = self.run_adb(["shell", "dumpsys hdmi_control | grep -E 'logical_address: 0x05|mSystemAudioActivated|AudioDeviceOutType'"])
+            if cec_dump:
+                print("    HDMI-CEC Bus State:")
+                for l in cec_dump.splitlines():
+                    print(f"      {l.strip()}")
+
+        # 3. Dynamic Configuration Table
+        print("\n--- 3. Dynamic Acoustic Configuration (from JSON) ---")
         latencies = self.get_latencies()
+        vol_offset = self.get_vol_offset_db()
+        peq_cmds = self.get_peq_command_strings()
+
         slots_desc = [
             "PCM 2.0 (LPCM Linear Stereo)",
             "Dolby Digital (AC-3 5.1)",
@@ -253,47 +348,44 @@ class TChordOrchestrator:
         for i, (desc, val) in enumerate(zip(slots_desc, latencies)):
             print(f"   [{i:02d}] | {desc:<32} | {val:>3} ms")
 
-        print("\n  Crossover Strategy: Linkwitz-Riley 4th Order (24 dB/oct) @ 480 Hz")
-        print("  Blauert Filter:     Fc=3500 Hz, Q=1.5, Gain=+3 dB (Median Plane Elevation)")
+        print(f"\n  ICLD Level Balance: {vol_offset} dB (TV micro-transducer attenuation)")
+        print("  PEQ Filter Commands:")
+        for c in peq_cmds:
+            print(f"    {c}")
         print("  Safety Boundary:    Zero-disk-write. Fully volatile in-RAM parameters.")
-        print("=" * 68 + "\n")
+        print("=" * 70 + "\n")
 
     def show_params(self):
         latencies = self.get_latencies()
+        vol_offset = self.get_vol_offset_db()
+        peq_cmds = self.get_peq_command_strings()
+
         data = {
-            "version": "2.0.0",
+            "version": "2.1.0",
+            "config_file": self.config_path,
             "audio_hal_keys": {
                 "AQ_TCSE_ENABLE": "1",
                 "AQ_TCSE_TUTTI_CHORAL_MODE": "1",
                 "AQ_TCSE_Speech_Clear": "1",
                 "AQ_TCSE_VERTICAL_SOUND_FIELD_MODE": "1",
-                "AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY": ",".join(str(x) for x in latencies)
+                "AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY": ",".join(str(x) for x in latencies),
+                "AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL": "16777215",
+                "AQ_OUTPUT_VOL_OFFSET": f"{vol_offset};AQ_DEVICE=SpeakerOutput"
             },
-            "peq_filters": [
-                {
-                    "band": 1,
-                    "type": "HighPass_LR4_Stage1",
-                    "param_string": "AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=1;Gain=0;Enable=1"
-                },
-                {
-                    "band": 2,
-                    "type": "HighPass_LR4_Stage2",
-                    "param_string": "AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=2;Gain=0;Enable=1"
-                },
-                {
-                    "band": 3,
-                    "type": "Blauert_Elevation_Peaking",
-                    "param_string": "AQ_PEQ_PARAM=1;Fc=3500;Type=0;AQ_DEVICE=SpeakerOutput;Q=150;Band=3;Gain=3;Enable=1"
-                }
-            ],
-            "routing_command": "com.tcl.audiomenu.service.TclHdmiTvClient.selectTSymphonyOutput()"
+            "peq_filters": peq_cmds,
+            "routing_actions": [
+                "settings put system tcl_app_settings_multi_sound_device true",
+                "settings put system tcl_app_settings_eARC_mode true",
+                "cmd hdmi_control setsystemaudiomode on",
+                "cmd hdmi_control setarc on"
+            ]
         }
         print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.0.0)",
+        description="TCL T-Chord Joint Acoustic Optimizer & Orchestrator (v2.1.0)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -306,7 +398,7 @@ Examples:
     parser.add_argument("--apply", action="store_true", help="Apply calibrated acoustic profile to TV Audio HAL")
     parser.add_argument("--restore", action="store_true", help="Restore TV Audio HAL to factory defaults")
     parser.add_argument("--diagnose", action="store_true", help="Run full diagnostic suite on TV and Soundbar")
-    parser.add_argument("--show-params", action="store_true", help="Print calibrated HAL parameters in JSON")
+    parser.add_argument("--show-params", action="store_true", help="Print active HAL parameters in JSON")
     parser.add_argument("--push-jar", action="store_true", help="Force push injector audiotool.jar to TV")
     parser.add_argument("--tv-ip", default=DEFAULT_TV_IP, help=f"TCL TV IP address (default: {DEFAULT_TV_IP})")
     parser.add_argument("--soundbar-ip", help="TCL Q95K Soundbar IP address (default: auto-probe)")
@@ -340,7 +432,7 @@ Examples:
         orchestrator.apply_profile()
         return
 
-    # If no action flag passed, run apply by default with diagnostics
+    # Default action
     orchestrator.diagnose()
     orchestrator.apply_profile()
 
