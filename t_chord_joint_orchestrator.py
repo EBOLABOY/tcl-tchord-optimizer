@@ -262,24 +262,128 @@ class TChordOrchestrator:
         if earc.strip().lower() != "true":
             self.run_adb(["shell", "settings", "put", "system", "tcl_app_settings_eARC_mode", "true"])
 
-    def verify_hal_in_logcat(self, expected_vol_tenth: int, expected_peqs: List[Dict[str, Any]], since_ts: Optional[str] = None) -> Tuple[bool, List[str]]:
-        _, log_out, _ = self.run_adb(["shell", "logcat", "-d", "-v", "threadtime", "-t", "200"], timeout=6)
+    def get_tv_runtime_state(self) -> Dict[str, Any]:
+        """Single fast ADB round-trip (~150ms) to read TV power, T-Chord mode, audio route, PIDs & active stream."""
+        state: Dict[str, Any] = {
+            "tv_online": False,
+            "wakefulness": "Unknown",
+            "is_awake": False,
+            "last_wake_time": "",
+            "audioserver_pid": "",
+            "hal_pid": "",
+            "tsymphony_prop": "",
+            "tsymphony_setting": "",
+            "multi_sound": "",
+            "earc_mode": "",
+            "music_volume": None,
+            "music_devices": "",
+            "active_stream": "Standby",
+            "is_tchord_active": False,
+            "has_speaker_route": False,
+            "has_arc_route": False,
+            "fingerprint": "",
+        }
+        try:
+            subprocess.run(["adb", "connect", f"{self.tv_ip}:5555"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
+        except Exception:
+            return state
+
+        probe_cmd = (
+            "echo WAKE=$(dumpsys power | grep -m1 'mWakefulness=' | sed 's/.*mWakefulness=//'); "
+            "echo LASTWAKE=$(dumpsys power | grep -m1 'mLastWakeTime=' | awk '{print $1}' | sed 's/.*=//'); "
+            "echo AS_PID=$(pidof audioserver); "
+            "echo HAL_PID=$(pidof vendor.mediatek.hardware.audio.service); "
+            "echo TSYMP_PROP=$(getprop sys.tcl.tsymphony.mode); "
+            "echo TSYMP_SET=$(settings get global tcl_app_settings_tsymphony_mode); "
+            "echo MULTI=$(settings get system tcl_app_settings_multi_sound_device); "
+            "echo EARC=$(settings get system tcl_app_settings_eARC_mode); "
+            "dumpsys audio | awk '/^- STREAM_MUSIC:/{f=1;next} f && /streamVolume:/{print \"VOL=\"$0} f && /Devices:/{print \"DEVS=\"$0; exit}'; "
+            "dumpsys media.audio_flinger | awk '/^Output thread /{out=1;t=$3;act=0} /^Input thread /{out=0;act=0} out && /Standby: no/{act=1;fmt=\"\";sr=\"\"} act && /HAL format:/{fmt=$0} act && /Sample rate:/{sr=$0} act && /Channel count:/{ch=$0; print \"STREAM=\"t\"|\"fmt\"|\"sr\"|\"ch; act=0}'"
+        )
+        ret, out, _ = self.run_adb(["shell", probe_cmd], timeout=6)
+        if ret != 0 or not out:
+            return state
+
+        state["tv_online"] = True
+        active_streams: List[str] = []
+        for raw_line in out.splitlines():
+            line = raw_line.strip()
+            if line.startswith("WAKE="):
+                state["wakefulness"] = line.split("=", 1)[1].strip()
+            elif line.startswith("LASTWAKE="):
+                state["last_wake_time"] = line.split("=", 1)[1].strip()
+            elif line.startswith("AS_PID="):
+                state["audioserver_pid"] = line.split("=", 1)[1].strip()
+            elif line.startswith("HAL_PID="):
+                state["hal_pid"] = line.split("=", 1)[1].strip()
+            elif line.startswith("TSYMP_PROP="):
+                state["tsymphony_prop"] = line.split("=", 1)[1].strip()
+            elif line.startswith("TSYMP_SET="):
+                state["tsymphony_setting"] = line.split("=", 1)[1].strip()
+            elif line.startswith("MULTI="):
+                state["multi_sound"] = line.split("=", 1)[1].strip().lower()
+            elif line.startswith("EARC="):
+                state["earc_mode"] = line.split("=", 1)[1].strip().lower()
+            elif line.startswith("VOL="):
+                m = re.search(r"streamVolume:(\d+)", line)
+                if m:
+                    state["music_volume"] = int(m.group(1))
+            elif line.startswith("DEVS="):
+                m = re.search(r"Devices:\s*(.+)$", line)
+                if m:
+                    state["music_devices"] = m.group(1).strip()
+            elif line.startswith("STREAM="):
+                body = line.split("=", 1)[1]
+                fmt_m = re.search(r"\((AUDIO_FORMAT_[^)]+)\)", body)
+                sr_m = re.search(r"Sample rate:\s*(\d+)\s*Hz", body)
+                ch_m = re.search(r"Channel count:\s*(\d+)", body)
+                if fmt_m:
+                    fmt = fmt_m.group(1).replace("AUDIO_FORMAT_", "")
+                    sr = f"{int(sr_m.group(1))//1000}kHz" if sr_m else ""
+                    ch = f"{ch_m.group(1)}ch" if ch_m else ""
+                    active_streams.append(" ".join(p for p in (fmt, sr, ch) if p))
+
+        devs_l = state["music_devices"].lower()
+        state["is_awake"] = state["wakefulness"] == "Awake"
+        state["has_speaker_route"] = "speaker" in devs_l
+        state["has_arc_route"] = ("hdmi_arc" in devs_l) or ("hdmi_earc" in devs_l)
+        state["is_tchord_active"] = (
+            state["tsymphony_prop"] == "1"
+            and state["has_speaker_route"]
+            and (state["has_arc_route"] or state["multi_sound"] == "true")
+        )
+        if active_streams:
+            state["active_stream"] = " + ".join(dict.fromkeys(active_streams))
+        state["fingerprint"] = f"{state['last_wake_time']}:{state['audioserver_pid']}:{state['hal_pid']}"
+        return state
+
+    def verify_hal_in_logcat(self, expected_vol_tenth: int, expected_peqs: List[Dict[str, Any]], since_ts: Optional[str] = None) -> Tuple[bool, List[str], Dict[str, Any]]:
+        _, hal_pid, _ = self.run_adb(["shell", "pidof", "vendor.mediatek.hardware.audio.service"], timeout=4)
+        hal_pid = hal_pid.strip().split()[0] if hal_pid.strip() else ""
+        if hal_pid.isdigit():
+            _, log_out, _ = self.run_adb(["shell", "logcat", "-d", "-v", "threadtime", f"--pid={hal_pid}", "-t", "300"], timeout=6)
+        else:
+            _, log_out, _ = self.run_adb(["shell", "logcat", "-d", "-v", "threadtime", "-t", "500"], timeout=6)
+
         lines = log_out.splitlines()
         if since_ts:
             lines = [l for l in lines if len(l) >= 18 and l[:18] >= since_ts]
 
         report: List[str] = []
+        meta: Dict[str, Any] = {"vol_step": None, "peq_count": 0, "error_count": 0}
         all_ok = True
 
         vol_pat = re.compile(r"_MI_LAPAF_FILTER_VOLUME_SetAudioVolParam.*Set VolGain\(step\):(-?\d+).*SPEAKER")
         vol_matches = [m for l in lines if (m := vol_pat.search(l))]
         if vol_matches:
             step = int(vol_matches[-1].group(1))
+            meta["vol_step"] = step
             report.append(f"[PASS] <APAF> SPEAKER VolGain(step)={step} ({step/10.0:.1f} dB) with OutputVolumeOffset={expected_vol_tenth} ({expected_vol_tenth/10.0:+.1f} dB)")
         else:
             report.append(f"[INFO] <APAF> SPEAKER VolGain unchanged (OutputVolumeOffset={expected_vol_tenth} already active in DSP)")
 
         peq_hits = [l for l in lines if "setPeqParam: Speaker_MsePeq set peqparam" in l]
+        meta["peq_count"] = len(peq_hits)
         if len(peq_hits) >= len(expected_peqs):
             report.append(f"[PASS] Speaker_MsePeq accepted {len(peq_hits)}/{len(expected_peqs)} PEQ updates on immune Band {[s['band'] for s in expected_peqs]}")
         else:
@@ -288,6 +392,7 @@ class TChordOrchestrator:
 
         err_keys = ("Failed to set PEQ", "Out of max PEQ", "SetParameter fail", "Set customer parameter fail", "Invalid band", "Error Invalid pipelinename")
         err_hits = [l for l in lines if any(k in l for k in err_keys)]
+        meta["error_count"] = len(err_hits)
         if err_hits:
             all_ok = False
             for eh in err_hits[-5:]:
@@ -295,7 +400,7 @@ class TChordOrchestrator:
         else:
             report.append("[PASS] Zero MI3 / APAF / audio_hw_primary errors detected")
 
-        return all_ok, report
+        return all_ok, report, meta
 
     def apply_profile(self) -> bool:
         print("=" * 74)
@@ -347,14 +452,15 @@ class TChordOrchestrator:
         print("\n" + stdout)
 
         time.sleep(0.3)
-        verified, v_lines = self.verify_hal_in_logcat(vol_tenth, peq_specs, since_ts=since_ts)
+        verified, v_lines, v_meta = self.verify_hal_in_logcat(vol_tenth, peq_specs, since_ts=since_ts)
+        self.last_verify_meta = {**v_meta, "verified": verified, "report": v_lines}
         print("\n--- Live TV Audio HAL / MI3 DSP Verification (logcat) ---")
         for vl in v_lines:
             print(f"  {vl}")
         print("=" * 74)
         print(">>> [VERIFIED SUCCESS] v3.1 PBA Profile Active in DSP! <<<" if verified else "[!] Dispatched with verification warnings.")
         print("=" * 74)
-        return True
+        return verified
 
     def restore_defaults(self, reset_legacy_v2_settings: bool = True) -> bool:
         print("=" * 74)
@@ -429,6 +535,30 @@ class TChordOrchestrator:
             print(f"     Band {s['band']:2d} | {s['type_name']:<8s} | Fc={s['fc_hz']:4d}Hz | Q={s['q_factor']:.2f} (HAL {s['q_hal']:2d}) | Gain={s['gain_db']:+.1f}dB (net {vol_db+s['gain_db']:+.1f}dB)")
         print("=" * 74)
 
+    def live_check(self) -> Dict[str, Any]:
+        """Read-only live runtime & HAL pipeline analysis."""
+        st = self.get_tv_runtime_state()
+        sbar_ok, sbar_ip, sbar_d = self.probe_soundbar()
+        hal_events: Dict[str, Any] = {"last_vol_step": None, "last_sbar_latency": None, "aiaq_events": 0, "hal_errors": 0}
+
+        if st["tv_online"] and st["hal_pid"].isdigit():
+            _, log_out, _ = self.run_adb(["shell", "logcat", "-d", "-v", "threadtime", f"--pid={st['hal_pid']}", "-t", "500"], timeout=6)
+            vol_pat = re.compile(r"Set VolGain\(step\):(-?\d+).*SPEAKER")
+            lat_pat = re.compile(r"_utils_lapaf_get_tcse_tutti_choral_latency:\s*(.+)$")
+            for line in log_out.splitlines():
+                if (m := vol_pat.search(line)):
+                    hal_events["last_vol_step"] = int(m.group(1))
+                if (m := lat_pat.search(line)):
+                    hal_events["last_sbar_latency"] = m.group(1).strip()
+                if "TRACK_AIAQ_MODE" in line or "setDolbySoundMode" in line:
+                    hal_events["aiaq_events"] += 1
+                if any(k in line for k in ("Failed to set PEQ", "Out of max PEQ", "SetParameter fail", "Invalid band")):
+                    hal_events["hal_errors"] += 1
+
+        result = {"tv_state": st, "soundbar_online": sbar_ok, "soundbar_ip": sbar_ip, "soundbar": sbar_d, "hal_recent": hal_events}
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return result
+
     def show_params(self):
         vol_db, vol_tenth = self.get_vol_offset_db(), self.get_vol_offset_tenth_db()
         peq_specs = self.build_peq_specs()
@@ -448,6 +578,7 @@ def main():
     parser.add_argument("--apply", action="store_true", help="Apply v3.1 PBA profile and verify in TV logcat")
     parser.add_argument("--restore", action="store_true", help="Restore TV Audio HAL and legacy settings to defaults")
     parser.add_argument("--diagnose", action="store_true", help="Run TV HAL, HDMI-CEC TRD, and Q95K StreamSDK diagnostics")
+    parser.add_argument("--check", action="store_true", help="Fast live runtime & T-Chord state check (JSON)")
     parser.add_argument("--show-params", action="store_true", help="Print resolved HAL parameter commands in JSON")
     parser.add_argument("--push-jar", action="store_true", help="Force push audiotool.jar to TV")
     parser.add_argument("--tv-ip", default=DEFAULT_TV_IP, help=f"TCL TV IP (default: {DEFAULT_TV_IP})")
@@ -462,6 +593,8 @@ def main():
         orch.show_params()
     elif args.diagnose:
         orch.diagnose()
+    elif args.check:
+        orch.live_check()
     elif args.restore:
         sys.exit(0 if orch.restore_defaults() else 1)
     elif args.apply:

@@ -53,10 +53,17 @@ def analyze_audio_flinger(dump_text: str):
 
 def start_capture(duration_sec: int = 20):
     print_header(f"LIVE HAL CAPTURE ({duration_sec}s Window - Read-Only, No Logcat Clear)")
-    logcat_cmd = [
-        "adb", "-s", f"{TV_IP}:5555", "shell", "logcat", "-v", "time", "-T", "1",
-        "audio_hw_primary:V", "APAF:V", "MI_AUDIO:V", "thal_audio:V", "TclSoundEffect:V", "*:S"
-    ]
+    pid_out = subprocess.run(
+        ["adb", "-s", f"{TV_IP}:5555", "shell", "pidof", "vendor.mediatek.hardware.audio.service"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=4
+    ).stdout.strip().split()
+    if pid_out and pid_out[0].isdigit():
+        logcat_cmd = ["adb", "-s", f"{TV_IP}:5555", "shell", "logcat", "-v", "time", "-T", "1", f"--pid={pid_out[0]}"]
+    else:
+        logcat_cmd = [
+            "adb", "-s", f"{TV_IP}:5555", "shell", "logcat", "-v", "time", "-T", "1",
+            "audio_hw_primary:V", "<APAF>:V", "MI_AUDIO:V", "thal_audio:V", "TclSoundEffect:V", "*:S"
+        ]
     proc = subprocess.Popen(logcat_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     start_time = time.time()
     events = []
