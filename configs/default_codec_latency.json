@@ -1,5 +1,5 @@
 {
-  "version": "3.1.0",
+  "version": "3.1.2",
   "profile_name": "PBA-300Hz-LR4-ICLD-8dB",
   "target_hardware": {
     "tv": "TCL 75Q9M Pro (MT9655 / Android 14 / Onkyo 2.1.2 5-Driver 80W)",
@@ -18,7 +18,9 @@
     "speech_clear": 0,
     "dolby_dialog_enhancer_enable": false,
     "dolby_dialog_enhancer_level": 0,
-    "dolby_volume_leveler": false
+    "dolby_volume_leveler": false,
+    "disable_tv_aiaq_adaptive_content": true,
+    "sync_tv_dolby_mode_with_q95k_trd": true
   },
   "tv_routing": {
     "ensure_multi_sound_and_earc": true

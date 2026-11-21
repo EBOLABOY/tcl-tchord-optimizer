@@ -55,6 +55,32 @@ CEC_SBAR_FORMAT_LABELS = {
 }
 
 
+# Verified audio.tcl.default.so Sound Mode / CEC TRD EQ Mode enum
+TRD_EQ_TO_DOLBY_MODE = {
+    0: "Standard",
+    1: "Movie",
+    2: "Music",
+    3: "Voice",
+    4: "Game",
+    5: "Sport",
+    6: "Standard",   # User/Personal -> neutral Standard on TV DAP
+    7: "Standard",   # Dynamic/Intelligent -> neutral Standard (prevent TV AIAQ drift)
+    14: "Night",
+}
+TRD_EQ_LABELS = {
+    0: "Standard (标准)",
+    1: "Movie (电影)",
+    2: "Music (音乐)",
+    3: "Voice (人声)",
+    4: "Game (游戏)",
+    5: "Sport (体育)",
+    6: "User (自定义)",
+    7: "Dynamic (智能)",
+    8: "Live (现场)",
+    14: "Night (夜间)",
+}
+
+
 class TChordOrchestrator:
     def __init__(self, tv_ip: str = DEFAULT_TV_IP, soundbar_ip: Optional[str] = None, config_path: Optional[str] = None):
         self.tv_ip = tv_ip
@@ -125,9 +151,11 @@ class TChordOrchestrator:
             })
         return specs
 
-    def get_extra_hal_commands(self) -> List[str]:
+    def get_extra_hal_commands(self, dolby_sound_mode: Optional[str] = None) -> List[str]:
         flags = self.config_data.get("hal_flags", {})
         cmds: List[str] = []
+        if dolby_sound_mode:
+            cmds.append(f"AQ_DolbySoundMode={dolby_sound_mode}")
         if flags.get("dolby_dialog_enhancer_enable", False):
             lvl = max(0, min(10, int(flags.get("dolby_dialog_enhancer_level", 0))))
             cmds.append(f"AQ_DolbyDialogEnhancerEnable=On;AQ_DolbyDialogEnhancer={lvl}")
@@ -135,6 +163,44 @@ class TChordOrchestrator:
             cmds.append("AQ_DolbyDialogEnhancerEnable=Off")
         cmds.append("AQ_DolbyVolumeLevler=On" if flags.get("dolby_volume_leveler", False) else "AQ_DolbyVolumeLevler=Off")
         return cmds
+
+    def get_q95k_trd_eq_mode(self) -> Tuple[Optional[int], Optional[str]]:
+        """Query Q95K active EQ mode via TV HDMI-CEC TclHdmiTvClient (TRD)."""
+        if not self.ensure_injector():
+            return None, None
+        ret, out, _ = self.run_adb(
+            ["shell", f"CLASSPATH={REMOTE_JAR_PATH} app_process / {REMOTE_CLASS} query_soundbar_cec"],
+            timeout=6,
+        )
+        if ret != 0 or not out:
+            return None, None
+        m = re.search(r"getTrdDeviceEqMode\s*=>\s*(-?\d+)", out)
+        if not m:
+            return None, None
+        code = int(m.group(1))
+        return code, TRD_EQ_TO_DOLBY_MODE.get(code, "Standard")
+
+    def sync_tv_aiaq_and_dolby_mode(self, eq_code: Optional[int] = None, dolby_mode: Optional[str] = None) -> Tuple[Optional[int], Optional[str]]:
+        """Disable TV AIAQ adaptive content hijacking and sync TV Dolby DAP mode to Q95K TRD EQ mode."""
+        flags = self.config_data.get("hal_flags", {})
+        if flags.get("disable_tv_aiaq_adaptive_content", True):
+            _, cur_aiaq, _ = self.run_adb(["shell", "settings", "get", "system", "tcl_sys_audio_aiaq_adaptive_content"], timeout=4)
+            if cur_aiaq.strip() != "0":
+                self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_aiaq_adaptive_content", "0"], timeout=4)
+
+        if not flags.get("sync_tv_dolby_mode_with_q95k_trd", True):
+            return None, None
+
+        if eq_code is None or dolby_mode is None:
+            eq_code, dolby_mode = self.get_q95k_trd_eq_mode()
+        if dolby_mode:
+            cmds = self.get_extra_hal_commands(dolby_sound_mode=dolby_mode)
+            for c in cmds:
+                self.run_adb(
+                    ["shell", f"CLASSPATH={REMOTE_JAR_PATH} app_process / {REMOTE_CLASS} set '{c}'"],
+                    timeout=6,
+                )
+        return eq_code, dolby_mode
 
     def probe_soundbar(self, ip: Optional[str] = None) -> Tuple[bool, Optional[str], Dict[str, Any]]:
         """Read-only StreamSDK CM API telemetry probe (respects authMode=setData)."""
@@ -275,6 +341,7 @@ class TChordOrchestrator:
             "tsymphony_setting": "",
             "multi_sound": "",
             "earc_mode": "",
+            "aiaq_adaptive": "",
             "music_volume": None,
             "music_devices": "",
             "active_stream": "Standby",
@@ -297,6 +364,7 @@ class TChordOrchestrator:
             "echo TSYMP_SET=$(settings get global tcl_app_settings_tsymphony_mode); "
             "echo MULTI=$(settings get system tcl_app_settings_multi_sound_device); "
             "echo EARC=$(settings get system tcl_app_settings_eARC_mode); "
+            "echo AIAQ=$(settings get system tcl_sys_audio_aiaq_adaptive_content); "
             "dumpsys audio | awk '/^- STREAM_MUSIC:/{f=1;next} f && /streamVolume:/{print \"VOL=\"$0} f && /Devices:/{print \"DEVS=\"$0; exit}'; "
             "dumpsys media.audio_flinger | awk '/^Output thread /{out=1;t=$3;act=0} /^Input thread /{out=0;act=0} out && /Standby: no/{act=1;fmt=\"\";sr=\"\"} act && /HAL format:/{fmt=$0} act && /Sample rate:/{sr=$0} act && /Channel count:/{ch=$0; print \"STREAM=\"t\"|\"fmt\"|\"sr\"|\"ch; act=0}'"
         )
@@ -324,6 +392,8 @@ class TChordOrchestrator:
                 state["multi_sound"] = line.split("=", 1)[1].strip().lower()
             elif line.startswith("EARC="):
                 state["earc_mode"] = line.split("=", 1)[1].strip().lower()
+            elif line.startswith("AIAQ="):
+                state["aiaq_adaptive"] = line.split("=", 1)[1].strip()
             elif line.startswith("VOL="):
                 m = re.search(r"streamVolume:(\d+)", line)
                 if m:
@@ -390,6 +460,12 @@ class TChordOrchestrator:
             all_ok = False
             report.append(f"[WARN] Expected {len(expected_peqs)} Speaker_MsePeq updates, observed {len(peq_hits)}")
 
+        mode_pat = re.compile(r"setDolbySoundMode: Dap set sound mode \(([^)]+)\)")
+        mode_matches = [m for l in lines if (m := mode_pat.search(l))]
+        if mode_matches:
+            meta["dolby_mode"] = mode_matches[-1].group(1)
+            report.append(f"[PASS] TV Dolby DAP synced -> AQ_DolbySoundMode={meta['dolby_mode']} (aligned with Q95K TRD)")
+
         err_keys = ("Failed to set PEQ", "Out of max PEQ", "SetParameter fail", "Set customer parameter fail", "Invalid band", "Error Invalid pipelinename")
         err_hits = [l for l in lines if any(k in l for k in err_keys)]
         meta["error_count"] = len(err_hits)
@@ -425,12 +501,27 @@ class TChordOrchestrator:
         if not self.ensure_injector():
             return False
 
+        flags = self.config_data.get("hal_flags", {})
+        if flags.get("disable_tv_aiaq_adaptive_content", True):
+            _, cur_aiaq, _ = self.run_adb(["shell", "settings", "get", "system", "tcl_sys_audio_aiaq_adaptive_content"], timeout=4)
+            if cur_aiaq.strip() != "0":
+                self.run_adb(["shell", "settings", "put", "system", "tcl_sys_audio_aiaq_adaptive_content", "0"], timeout=4)
+                print("[*] TV AIAQ Adaptive Content: Disabled (0) to prevent Movie preset hijacking")
+
+        trd_eq_code, synced_dolby_mode = (None, None)
+        if flags.get("sync_tv_dolby_mode_with_q95k_trd", True):
+            trd_eq_code, synced_dolby_mode = self.get_q95k_trd_eq_mode()
+        self.last_synced_trd_eq = trd_eq_code
+        self.last_synced_dolby_mode = synced_dolby_mode
+
         vol_db = self.get_vol_offset_db()
         vol_tenth = self.get_vol_offset_tenth_db()
         peq_specs = self.build_peq_specs()
-        extra_cmds = self.get_extra_hal_commands()
+        extra_cmds = self.get_extra_hal_commands(dolby_sound_mode=synced_dolby_mode)
 
         print(f"[*] T-Chord CEC Link   : Native Q95K 0xA0/0x1B latency & channel preserved")
+        if synced_dolby_mode:
+            print(f"[*] Sound Mode Sync    : Q95K TRD eq_mode={trd_eq_code} ({TRD_EQ_LABELS.get(trd_eq_code, trd_eq_code)}) -> TV AQ_DolbySoundMode={synced_dolby_mode}")
         print(f"[*] Base ICLD Offset   : {vol_db:+.1f} dB -> OutputVolumeOffset={vol_tenth}")
         print(f"[*] PBA Immune PEQ     : {len(peq_specs)} bands on Band {[s['band'] for s in peq_specs]}")
         for s in peq_specs:

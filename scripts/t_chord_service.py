@@ -23,7 +23,7 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_DIR not in sys.path:
     sys.path.insert(0, REPO_DIR)
 
-from t_chord_joint_orchestrator import TChordOrchestrator
+from t_chord_joint_orchestrator import TChordOrchestrator, TRD_EQ_LABELS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("TChordService")
@@ -38,7 +38,7 @@ DEFAULT_HTTP_PORT = int(os.environ.get("SERVICE_PORT", 8998))
 DEFAULT_POLL_INTERVAL = int(os.environ.get("GUARDIAN_POLL_SEC", 15))
 
 state_info: Dict[str, Any] = {
-    "version": "3.1.1",
+    "version": "3.1.2",
     "profile": "PBA-300Hz-LR4-ICLD-8dB",
     "status": "服务已启动 (初始化检测中)",
     "guardian_mode": "init",
@@ -53,6 +53,9 @@ state_info: Dict[str, Any] = {
     "music_volume": None,
     "dsp_vol_step": None,
     "dsp_verified": False,
+    "q95k_sound_mode": "未知",
+    "tv_dolby_mode_synced": "未知",
+    "tv_aiaq_adaptive_content": "未知",
     "soundbar_ip": "未知",
     "soundbar_model": "TCL Q95K 11.1.4 (Illusonic DSP Type 13)",
     "latency_policy": "保留原生 Q95K HDMI-CEC 0x1B 出厂协商时延表",
@@ -68,6 +71,9 @@ guardian_runtime: Dict[str, Any] = {
     "manual_restore_fingerprint": None,
     "last_ha_state": None,
     "last_error_log_ts": 0.0,
+    "synced_trd_eq": None,
+    "poll_tick": 0,
+    "last_stream": None,
 }
 
 orchestrator: Optional[TChordOrchestrator] = None
@@ -106,6 +112,8 @@ def update_ha_sensor(state_str: str, force: bool = False):
         state_info["tchord_active"],
         state_info["active_stream"],
         state_info["dsp_vol_step"],
+        state_info["q95k_sound_mode"],
+        state_info["tv_aiaq_adaptive_content"],
         state_info["last_injected"],
     ):
         return
@@ -125,6 +133,9 @@ def update_ha_sensor(state_str: str, force: bool = False):
             "music_volume": state_info["music_volume"],
             "dsp_vol_step": state_info["dsp_vol_step"],
             "dsp_verified": state_info["dsp_verified"],
+            "q95k_sound_mode": state_info["q95k_sound_mode"],
+            "tv_dolby_mode_synced": state_info["tv_dolby_mode_synced"],
+            "tv_aiaq_adaptive_content": state_info["tv_aiaq_adaptive_content"],
             "tv_model": "TCL 75Q9M Pro (MT9655 / Onkyo 2.1.2 5单元)",
             "soundbar_model": state_info["soundbar_model"],
             "tv_ip": CONFIG.get("tv_ip"),
@@ -150,6 +161,8 @@ def update_ha_sensor(state_str: str, force: bool = False):
                 state_info["tchord_active"],
                 state_info["active_stream"],
                 state_info["dsp_vol_step"],
+                state_info["q95k_sound_mode"],
+                state_info["tv_aiaq_adaptive_content"],
                 state_info["last_injected"],
             )
             logger.info(f"Updated HA sensor.tcl_tchord_status -> {state_str}")
@@ -171,6 +184,14 @@ async def _apply_now(fingerprint: Optional[str] = None, reason: str = "manual") 
         state_info["dsp_verified"] = bool(vmeta.get("verified", True))
         if vmeta.get("vol_step") is not None:
             state_info["dsp_vol_step"] = vmeta["vol_step"]
+        trd_eq = getattr(orchestrator, "last_synced_trd_eq", None)
+        dolby_m = getattr(orchestrator, "last_synced_dolby_mode", None)
+        if trd_eq is not None:
+            guardian_runtime["synced_trd_eq"] = trd_eq
+            state_info["q95k_sound_mode"] = TRD_EQ_LABELS.get(trd_eq, str(trd_eq))
+        if dolby_m:
+            state_info["tv_dolby_mode_synced"] = dolby_m
+        state_info["tv_aiaq_adaptive_content"] = "已关闭 (0)"
         state_info["soundbar_ip"] = orchestrator.soundbar_ip or state_info["soundbar_ip"]
         state_info["soundbar_model"] = getattr(orchestrator, "soundbar_model", state_info["soundbar_model"])
         guardian_runtime["applied_fingerprint"] = fingerprint
@@ -219,6 +240,7 @@ async def reconcile_tv_state(reason: str = "poll", force_apply: bool = False) ->
         state_info["audio_route"] = rt["music_devices"] or "未知"
         state_info["active_stream"] = rt["active_stream"]
         state_info["music_volume"] = rt["music_volume"]
+        state_info["tv_aiaq_adaptive_content"] = "已关闭 (0)" if rt.get("aiaq_adaptive") == "0" else f"开启 ({rt.get('aiaq_adaptive')})"
 
         if not rt["tv_online"]:
             guardian_runtime["applied_fingerprint"] = None
@@ -257,7 +279,30 @@ async def reconcile_tv_state(reason: str = "poll", force_apply: bool = False) ->
                 res = await _apply_now(fingerprint=fp, reason=reason)
                 return {"action": "applied", "result": res, "runtime": rt}
 
-            # Already active on current wake/HAL session
+            # Already active on current wake/HAL session — guard against AIAQ re-enable or Q95K EQ mode switch
+            guardian_runtime["poll_tick"] += 1
+            stream_changed = guardian_runtime["last_stream"] != rt["active_stream"]
+            guardian_runtime["last_stream"] = rt["active_stream"]
+            aiaq_re_enabled = rt.get("aiaq_adaptive") not in ("0", "")
+            check_trd = aiaq_re_enabled or stream_changed or (guardian_runtime["poll_tick"] % 4 == 0)
+
+            if check_trd:
+                eq_code, dolby_mode = await loop.run_in_executor(None, orchestrator.get_q95k_trd_eq_mode)
+                mode_changed = eq_code is not None and eq_code != guardian_runtime["synced_trd_eq"]
+                if aiaq_re_enabled or mode_changed:
+                    logger.info(
+                        f"[{reason}] Syncing TV mode (aiaq={rt.get('aiaq_adaptive')}, Q95K eq_mode={guardian_runtime['synced_trd_eq']}->{eq_code} / {dolby_mode})"
+                    )
+                    await loop.run_in_executor(None, orchestrator.sync_tv_aiaq_and_dolby_mode, eq_code, dolby_mode)
+                    if eq_code is not None:
+                        guardian_runtime["synced_trd_eq"] = eq_code
+                        state_info["q95k_sound_mode"] = TRD_EQ_LABELS.get(eq_code, str(eq_code))
+                    if dolby_mode:
+                        state_info["tv_dolby_mode_synced"] = dolby_mode
+                    state_info["tv_aiaq_adaptive_content"] = "已关闭 (0)"
+                    update_ha_sensor(state_info["status"], force=True)
+                    return {"action": "mode_synced", "q95k_eq_mode": eq_code, "tv_dolby_mode": dolby_mode, "runtime": rt}
+
             update_ha_sensor(state_info["status"])
             return {"action": "already_active", "runtime": rt}
 
@@ -285,6 +330,7 @@ async def handle_inject(request):
         state_info["audio_route"] = rt["music_devices"] or "未知"
         state_info["active_stream"] = rt["active_stream"]
         state_info["music_volume"] = rt["music_volume"]
+        state_info["tv_aiaq_adaptive_content"] = "已关闭 (0)" if rt.get("aiaq_adaptive") == "0" else f"开启 ({rt.get('aiaq_adaptive')})"
         return web.json_response(await _apply_now(fingerprint=rt.get("fingerprint"), reason="http_inject"))
 
 
@@ -427,7 +473,7 @@ def main():
     runner = web.AppRunner(app)
     loop.run_until_complete(runner.setup())
     loop.run_until_complete(web.TCPSite(runner, "0.0.0.0", args.port).start())
-    logger.info(f"T-Chord PVE Guardian Service v3.1.1 (PBA) listening on :{args.port}")
+    logger.info(f"T-Chord PVE Guardian Service v{state_info['version']} (PBA) listening on :{args.port}")
     loop.run_forever()
 
 
