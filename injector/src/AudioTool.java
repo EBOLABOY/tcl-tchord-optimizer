@@ -6,15 +6,13 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * TCL T-Chord In-Memory Parameter Injector & Audio HAL Tool (v2.2.1)
+ * TCL T-Chord In-Memory Audio HAL Injector & CEC TRD Query Tool (v3.1.0)
  *
- * Supports 11.1.6 IMAX / Auro-3D Tri-Level Spatial Acoustic Matrix:
- * - Direct volatile reflection into android.media.AudioSystem
- * - Multi-band PEQ with cascaded Linkwitz-Riley 4th Order highpass + Blauert 3.5kHz peaking
- * - ICLD attenuation balance (AQ_OUTPUT_VOL_OFFSET) into MediaTek <APAF> DSP
- * - Dual Physical Sky Channel activation (AQ_TCSE_VERTICAL_SOUND_FIELD_MODE & PARAMS)
- * - Bundled SBAR_CHANNEL mask (16777215) to eliminate vendor HAL return code bug
- * - Non-zero exit code (System.exit(2)) on any failure
+ * Binary-verified on TCL 75Q9M Pro (MT9655 / Android 14):
+ * - Speaker_MsePeq: 13 hardware biquads (Band 1..8 owned by TCL/AIAQ; Band 9..13 immune)
+ * - AQ_PEQ_PARAM  : Type 0=Peaking (Q/10), 1=HPF (Q/100), 2=LPF (Q/100), 3=LS, 4=HS; Gain in 0.1 dB
+ * - VolumeOffset  : AQ_OUTPUT_VOL_OFFSET=1;OutputVolumeOffset=<0.1dB>;AQ_DEVICE=SpeakerOutput
+ * - String bools  : AQ_TCSE_ENABLE / AQ_DolbyDialogEnhancerEnable / AQ_DolbyVolumeLevler => "On"/"Off"
  */
 public class AudioTool {
 
@@ -34,7 +32,8 @@ public class AudioTool {
     public static String get(String key) {
         if (sGetParametersMethod == null) return "";
         try {
-            return (String) sGetParametersMethod.invoke(null, key);
+            Object res = sGetParametersMethod.invoke(null, key);
+            return res == null ? "" : res.toString();
         } catch (Throwable t) {
             System.err.println("[-] AudioSystem.getParameters failed: " + t.getMessage());
             return "";
@@ -51,153 +50,152 @@ public class AudioTool {
         }
     }
 
-    private static void handleGet(String key) {
-        String val = get(key);
-        System.out.println("GET " + key + " => " + (val == null ? "" : val));
-    }
-
     private static int handleSet(String kv) {
         int ret = set(kv);
         System.out.println("SET [" + kv + "] => ret=" + ret);
         return ret;
     }
 
-    private static void handleApplyCalibratedProfile(String[] args) throws Exception {
-        System.out.println("=====================================================");
-        System.out.println(" Applying 11.1.6 Spatial Acoustic Matrix Profile     ");
-        System.out.println("=====================================================");
-
-        String latencies = "42,58,66,80,84,92,74,54,82,50,50";
-        int volOffsetDb = -7;
-        List<String> peqCommands = new ArrayList<>();
-        String verticalFieldParams = "elevation_gain=3dB,crossover_hz=480,hrtf_enable=0";
-
-        if (args.length > 1 && args[1] != null && !args[1].trim().isEmpty()) {
-            latencies = args[1].trim();
-        }
-        if (args.length > 2 && args[2] != null && !args[2].trim().isEmpty()) {
-            try {
-                volOffsetDb = Integer.parseInt(args[2].trim());
-            } catch (NumberFormatException ignored) {}
-        }
-        if (args.length > 3 && args[3] != null && !args[3].trim().isEmpty()) {
-            String[] peqs = args[3].split("\\|\\|");
-            for (String p : peqs) {
-                if (!p.trim().isEmpty()) {
-                    peqCommands.add(p.trim());
-                }
+    private static void executeBatch(List<String> commands) {
+        int failCount = 0;
+        for (String cmd : commands) {
+            if (cmd == null || cmd.trim().isEmpty()) continue;
+            if (handleSet(cmd.trim()) != 0) {
+                failCount++;
             }
         }
-        if (args.length > 4 && args[4] != null && !args[4].trim().isEmpty()) {
-            verticalFieldParams = args[4].trim();
+        if (failCount > 0) {
+            System.err.println("[-] Error: " + failCount + " Audio HAL parameter(s) returned non-zero.");
+            System.exit(2);
+        }
+    }
+
+    /**
+     * Apply calibrated v3.1 PBA T-Chord profile to TV SpeakerOutput.
+     * Args:
+     *   args[1] (optional): vol_offset_tenth_db (default "-80" => -8.0 dB)
+     *   args[2] (optional): pipe-delimited PEQ commands
+     *   args[3] (optional): pipe-delimited extra HAL commands
+     */
+    private static void handleApplyCalibratedProfile(String[] args) {
+        int volOffsetTenthDb = -80; // -8.0 dB in 0.1 dB units
+        List<String> peqCommands = new ArrayList<>();
+        List<String> extraCommands = new ArrayList<>();
+
+        if (args.length > 1 && args[1] != null && !args[1].trim().isEmpty()) {
+            try {
+                volOffsetTenthDb = Integer.parseInt(args[1].trim());
+            } catch (NumberFormatException e) {
+                System.err.println("[!] Invalid vol_offset_tenth_db '" + args[1] + "', using -80 (-8.0 dB)");
+            }
+        }
+        if (args.length > 2 && args[2] != null && !args[2].trim().isEmpty()) {
+            for (String p : args[2].split("\\|\\|")) {
+                if (!p.trim().isEmpty()) peqCommands.add(p.trim());
+            }
+        }
+        if (args.length > 3 && args[3] != null && !args[3].trim().isEmpty()) {
+            for (String e : args[3].split("\\|\\|")) {
+                if (!e.trim().isEmpty()) extraCommands.add(e.trim());
+            }
         }
 
         if (peqCommands.isEmpty()) {
-            peqCommands.add("AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=1;Gain=0;Enable=1");
-            peqCommands.add("AQ_PEQ_PARAM=1;Fc=480;Type=2;AQ_DEVICE=SpeakerOutput;Q=71;Band=2;Gain=0;Enable=1");
-            peqCommands.add("AQ_PEQ_PARAM=1;Fc=3500;Type=0;AQ_DEVICE=SpeakerOutput;Q=150;Band=3;Gain=3;Enable=1");
+            // Default v3.1 Perceptual Band Allocation (PBA) on AIAQ-immune Band 9..13
+            peqCommands.add("AQ_PEQ_PARAM=1;Fc=300;Type=1;AQ_DEVICE=SpeakerOutput;Q=71;Band=9;Gain=0;Enable=1");
+            peqCommands.add("AQ_PEQ_PARAM=1;Fc=300;Type=1;AQ_DEVICE=SpeakerOutput;Q=71;Band=10;Gain=0;Enable=1");
+            peqCommands.add("AQ_PEQ_PARAM=1;Fc=1000;Type=0;AQ_DEVICE=SpeakerOutput;Q=10;Band=11;Gain=-20;Enable=1");
+            peqCommands.add("AQ_PEQ_PARAM=1;Fc=4000;Type=0;AQ_DEVICE=SpeakerOutput;Q=14;Band=12;Gain=20;Enable=1");
+            peqCommands.add("AQ_PEQ_PARAM=1;Fc=8000;Type=0;AQ_DEVICE=SpeakerOutput;Q=14;Band=13;Gain=15;Enable=1");
         }
 
         List<String> commands = new ArrayList<>();
-        commands.add("AQ_TCSE_ENABLE=1");
-        commands.add("AQ_TCSE_TUTTI_CHORAL_MODE=1");
         commands.add("AQ_TCSE_Speech_Clear=0");
-        commands.add("AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=1");
-        commands.add("AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS=" + verticalFieldParams);
-        commands.add("AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY=" + latencies + ";AQ_TCSE_TUTTI_CHORAL_SBAR_CHANNEL=16777215");
-        commands.add("AQ_OUTPUT_VOL_OFFSET=" + volOffsetDb + ";AQ_DEVICE=SpeakerOutput");
-        commands.add("AQ_DolbyDialogEnhancerEnable=1;AQ_DolbyDialogEnhancer=10");
-        commands.add("AQ_DolbyVolumeLevler=1");
+        commands.add("AQ_OUTPUT_VOL_OFFSET=1;OutputVolumeOffset=" + volOffsetTenthDb + ";AQ_DEVICE=SpeakerOutput");
         commands.addAll(peqCommands);
+        commands.addAll(extraCommands);
 
-        int failCount = 0;
-        for (String cmd : commands) {
-            int ret = handleSet(cmd);
-            if (ret != 0) {
-                failCount++;
-            }
-        }
-
-        if (failCount > 0) {
-            System.err.println("[-] Error: " + failCount + " Audio HAL parameter(s) failed with non-zero return code.");
-            System.exit(2);
-        }
-
-        System.out.println("[+] 11.1.6 Spatial profile successfully loaded into Audio HAL.");
+        executeBatch(commands);
+        System.out.println("[+] Dispatched " + commands.size() + " HAL commands (verify via logcat).");
     }
 
     private static void handleRestoreDefaults() {
-        System.out.println("[*] Restoring TV Audio HAL to factory defaults...");
-        List<String> commands = Arrays.asList(
-            "AQ_PEQ_PARAM=1;Fc=1000;Type=0;AQ_DEVICE=SpeakerOutput;Q=160;Band=1;Gain=0;Enable=0",
-            "AQ_PEQ_PARAM=1;Fc=1000;Type=0;AQ_DEVICE=SpeakerOutput;Q=160;Band=2;Gain=0;Enable=0",
-            "AQ_PEQ_PARAM=1;Fc=1000;Type=0;AQ_DEVICE=SpeakerOutput;Q=160;Band=3;Gain=0;Enable=0",
-            "AQ_OUTPUT_VOL_OFFSET=0;AQ_DEVICE=SpeakerOutput",
-            "AQ_TCSE_Speech_Clear=0",
-            "AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=0",
-            "AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS="
-        );
-
-        int failCount = 0;
-        for (String cmd : commands) {
-            int ret = handleSet(cmd);
-            if (ret != 0) {
-                failCount++;
-            }
+        List<String> commands = new ArrayList<>();
+        for (int b = 9; b <= 13; b++) {
+            commands.add("AQ_PEQ_PARAM=1;Fc=1000;Type=0;AQ_DEVICE=SpeakerOutput;Q=10;Band=" + b + ";Gain=0;Enable=0");
         }
-
-        if (failCount > 0) {
-            System.err.println("[-] Warning: Failed to restore " + failCount + " parameter(s).");
-            System.exit(2);
+        for (int b = 1; b <= 4; b++) {
+            commands.add("AQ_PEQ_PARAM=1;Fc=1000;Type=0;AQ_DEVICE=SpeakerOutput;Q=10;Band=" + b + ";Gain=0;Enable=0");
         }
+        commands.add("AQ_OUTPUT_VOL_OFFSET=1;OutputVolumeOffset=0;AQ_DEVICE=SpeakerOutput");
+        commands.add("AQ_TCSE_Speech_Clear=0");
+        commands.add("AQ_TCSE_VERTICAL_SOUND_FIELD_MODE=0");
+        commands.add("AQ_DolbyDialogEnhancerEnable=Off");
+        commands.add("AQ_DolbyVolumeLevler=Off");
 
-        System.out.println("[+] Defaults restored.");
+        executeBatch(commands);
+        System.out.println("[+] HAL defaults restored.");
     }
 
-    private static void handleQueryStatus() {
-        System.out.println("[*] Querying current audio properties...");
-        String[] keys = {
-            "AQ_TCSE_ENABLE",
-            "AQ_TCSE_TUTTI_CHORAL_MODE",
-            "AQ_TCSE_Speech_Clear",
-            "AQ_TCSE_VERTICAL_SOUND_FIELD_MODE",
-            "AQ_TCSE_VERTICAL_SOUND_FIELD_PARAMS",
-            "AQ_OUTPUT_VOL_OFFSET",
-            "AQ_TCSE_TUTTI_CHORAL_SBAR_LATENCY",
-            "digital_out_on_off"
-        };
-        for (String k : keys) {
-            handleGet(k);
+    private static void handleQuerySoundbarCec() {
+        try {
+            Class<?> clientClass = Class.forName("android.hardware.hdmi.TclHdmiTvClient");
+            Object client = clientClass.getDeclaredConstructor().newInstance();
+
+            String[] methods = {
+                "getAvrDeviceIsTSymphony",
+                "getAvrDeviceIsTrd",
+                "getTclReadyVersion",
+                "getEarcStatus",
+                "getSbarBrandNameCode",
+                "getSbarCustomControlCapabilities",
+                "getTrdDeviceEqMode",
+                "getTrdDeviceEqList",
+                "getDialogEnhancer",
+                "getNightMode",
+                "getBassEnhancer",
+                "getSurroundVirtualizer",
+                "getSurroundSpeakerVol",
+                "getDefinition",
+                "getAiSonic",
+                "getTclReadyDeviceInfo",
+                "getTclReadyFeature"
+            };
+
+            for (String mName : methods) {
+                try {
+                    Object val = clientClass.getMethod(mName).invoke(client);
+                    System.out.println("CEC " + mName + " => " + (val == null ? "null" : val.toString()));
+                } catch (Throwable inner) {
+                    Throwable cause = inner.getCause() != null ? inner.getCause() : inner;
+                    System.out.println("CEC " + mName + " => <err: " + cause.getClass().getSimpleName() + ">");
+                }
+            }
+        } catch (Throwable t) {
+            Throwable cause = t.getCause() != null ? t.getCause() : t;
+            System.out.println("CEC_UNAVAILABLE: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
         }
     }
 
     public static void main(String[] args) {
         if (args.length == 0) {
-            printUsage();
+            System.out.println("TCL T-Chord AudioTool v3.1.0");
+            System.out.println("Usage: get <k> | set <k=v> | set_batch '<a||b>' | apply_calibrated_profile [tenth_db] [peq] [extra] | restore_defaults | query_soundbar_cec");
             return;
         }
-
-        String action = args[0];
         try {
-            switch (action) {
+            switch (args[0]) {
                 case "get":
-                    if (args.length > 1) {
-                        handleGet(args[1]);
-                    } else {
-                        System.err.println("Missing key argument for get");
-                        System.exit(1);
-                    }
+                    if (args.length < 2) System.exit(1);
+                    System.out.println("GET " + args[1] + " => " + get(args[1]));
                     break;
                 case "set":
-                    if (args.length > 1) {
-                        int ret = handleSet(args[1]);
-                        if (ret != 0) {
-                            System.exit(2);
-                        }
-                    } else {
-                        System.err.println("Missing parameter argument for set");
-                        System.exit(1);
-                    }
+                    if (args.length < 2) System.exit(1);
+                    if (handleSet(args[1]) != 0) System.exit(2);
+                    break;
+                case "set_batch":
+                    if (args.length < 2) System.exit(1);
+                    executeBatch(Arrays.asList(args[1].split("\\|\\|")));
                     break;
                 case "apply_calibrated_profile":
                     handleApplyCalibratedProfile(args);
@@ -205,29 +203,16 @@ public class AudioTool {
                 case "restore_defaults":
                     handleRestoreDefaults();
                     break;
-                case "query_status":
-                    handleQueryStatus();
+                case "query_soundbar_cec":
+                    handleQuerySoundbarCec();
                     break;
                 default:
-                    System.err.println("Unknown command: " + action);
-                    printUsage();
+                    System.err.println("Unknown command: " + args[0]);
                     System.exit(1);
-                    break;
             }
         } catch (Throwable t) {
             System.err.println("[-] Execution failed: " + t.getMessage());
-            t.printStackTrace(System.err);
             System.exit(3);
         }
-    }
-
-    private static void printUsage() {
-        System.out.println("TCL T-Chord In-Memory Optimizer Tool (v2.2.1 - 11.1.6 Spatial Matrix)");
-        System.out.println("Usage:");
-        System.out.println("  app_process ... AudioTool get <key>");
-        System.out.println("  app_process ... AudioTool set <key=value>");
-        System.out.println("  app_process ... AudioTool apply_calibrated_profile [latencies_csv] [vol_offset_db] [peq_commands_pipe_delimited] [vertical_sound_field_params]");
-        System.out.println("  app_process ... AudioTool restore_defaults");
-        System.out.println("  app_process ... AudioTool query_status");
     }
 }

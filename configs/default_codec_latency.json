@@ -1,109 +1,78 @@
 {
-  "description": "TCL T-Chord 11.1.6 Tri-Level Spatial Acoustic Matrix & 11-Slot Codec Latency Calibration Table",
-  "version": "2.2.1",
+  "version": "3.1.0",
+  "profile_name": "PBA-300Hz-LR4-ICLD-8dB",
   "target_hardware": {
-    "tv": "TCL 75Q9M Pro (MediaTek Pentonic 700 / MT9655 / Android 14 / Onkyo 2.1.2 80W 5-Driver System)",
-    "soundbar": "TCL Q95K 11.1.4 (Illusonic DSP Type 13 / MediaTek MT8532 / StreamSDK)"
+    "tv": "TCL 75Q9M Pro (MT9655 / Android 14 / Onkyo 2.1.2 5-Driver 80W)",
+    "soundbar": "TCL Q95K 11.1.4 (MT8532 / StreamSDK 26.02-Gallium / Illusonic Type 13 / 22 Drivers + Dual 7-inch Push-Push Sub)"
   },
-  "acoustic_architecture": {
-    "target_layout": "11.1.6 IMAX Enhanced & Auro-3D Tri-Level Spatial Matrix",
-    "total_physical_drivers": 18,
-    "ground_layer_channels": 11,
-    "subwoofer_lfe_channels": 1,
-    "height_sky_layer_channels": 6,
-    "dialogue_elevation_anchor": "TV Lower Micro-Transducer Array (Linkwitz-Riley 480Hz HPF + Blauert 3.5kHz Peaking)",
-    "room_geometry": {
-      "tv_to_soundbar_vertical_gap_cm": 40.0,
-      "screen_to_listening_position_m": 2.75,
-      "effective_listening_distance_m": 2.4,
-      "vertical_elevation_angle_deg": 19.5,
-      "optimal_icld_attenuation_db": -10.0
-    }
-  },
-  "slots": {
-    "0_multich_lpcm": 42,
-    "1_dd_ac3": 58,
-    "2_ddp_eac3": 66,
-    "3_ddp_atmos": 80,
-    "4_truehd": 84,
-    "5_truehd_atmos": 92,
-    "6_dolby_mat_pcm": 74,
-    "7_dts_core": 54,
-    "8_dtshd_dtsx": 82,
-    "9_reserved_1": 50,
-    "10_reserved_2": 50
-  },
-  "tri_level_height_matrix": {
-    "layer_allocation": {
-      "front_height_l_r": "Q95K Soundbar Front Up-Firing Reflection Array (Ceiling Angle 20°)",
-      "top_sky_l_r": "TCL 75Q9M Pro Onkyo Top-Firing Sky Drivers (Physical 1.45m Elevation, Ceiling Direct)",
-      "rear_height_l_r": "Q95K Wireless Satellite Up-Firing Reflection Array (Ceiling Angle 15°)"
-    },
-    "vertical_sound_field_mode": 1,
-    "vertical_sound_field_params": "elevation_gain=3dB,crossover_hz=480,hrtf_enable=0",
-    "top_channel_gain": 3,
-    "center_channel_gain": 10,
-    "rationale": "Combines 4x up-firing reflection drivers from Q95K with 2x physical top sky drivers from TV into a continuous 6-point hemispherical height dome (.6). HRTF reflections disabled (hrtf_enable=0) to prevent room reverberation doubling. Top sky gain balanced to 3dB to prevent ambient background music from masking center dialogue."
-  },
-  "crossover_network": {
-    "topology": "Linkwitz-Riley 4th Order (24dB/octave)",
-    "highpass_cutoff_hz": 480,
-    "rationale": "Prevents TV micro-transducer excursion overload (>1.2mm) below 400Hz and eliminates plastic chassis buzz, allocating chest resonance strictly to Q95K 10-inch subwoofer array"
-  },
-  "blauert_directional_filter": {
-    "center_frequency_hz": 3500,
-    "q_factor": 1.5,
-    "gain_db": 3.0,
-    "target": "SpeakerOutput",
-    "rationale": "Activates human pinna directional band (Vorn-Oben) to elevate dialogue phantom center directly across the 40cm gap to display screen midline"
+  "tchord_native_policy": {
+    "preserve_cec_sbar_latency": true,
+    "preserve_cec_sbar_channel": true,
+    "preserve_tcse_enable": true
   },
   "icld_level_balance": {
-    "tv_speaker_attenuation_relative_to_sbar_db": -7.0,
-    "rationale": "Per Wallis & Lee (JAES 2015) and 40cm/2.4m geometry: -7dB TV attenuation ensures robust dialogue presence and elevation without overpowering Q95K soundbar or creating dual-source doubling"
+    "tv_speaker_attenuation_db": -8.0,
+    "notes": "Wallis & Lee (JAES 2016; Appl. Sci. 2017/2020): -8.0 dB base ICLD sits in the -7.0 to -9.5 dB vertical crosstalk window (HAL OutputVolumeOffset=-80 in 0.1 dB units)."
   },
-  "dialogue_enhancement": {
-    "dolby_dialog_enhancer_db": 10,
-    "dolby_volume_leveler": 1,
-    "speech_intelligibility_boost_db": 5.0,
-    "speech_intelligibility_center_hz": 2000,
-    "rationale": "Engages Dolby MS12 hardware Dialog Enhancer (+10dB) and Volume Leveler (DRC) to bring whisper and speech clarity forward while curbing excessive background music and explosive SFX"
+  "hal_flags": {
+    "speech_clear": 0,
+    "dolby_dialog_enhancer_enable": false,
+    "dolby_dialog_enhancer_level": 0,
+    "dolby_volume_leveler": false
+  },
+  "tv_routing": {
+    "ensure_multi_sound_and_earc": true
   },
   "peq_filters": [
     {
-      "band": 1,
+      "band": 9,
       "device": "SpeakerOutput",
-      "type": 2,
-      "fc": 480,
-      "q": 71,
-      "gain": 0,
-      "description": "High-Pass Filter Stage 1 (Butterworth Q=0.707)"
+      "type": "hpf",
+      "fc_hz": 300,
+      "q_factor": 0.71,
+      "gain_db": 0.0,
+      "enable": true,
+      "description": "LR4 300Hz HPF Stage 1 (Type=1, Butterworth Q=0.71 -> HAL Q=71)"
     },
     {
-      "band": 2,
+      "band": 10,
       "device": "SpeakerOutput",
-      "type": 2,
-      "fc": 480,
-      "q": 71,
-      "gain": 0,
-      "description": "High-Pass Filter Stage 2 (Cascaded to form Linkwitz-Riley 24dB/oct)"
+      "type": "hpf",
+      "fc_hz": 300,
+      "q_factor": 0.71,
+      "gain_db": 0.0,
+      "enable": true,
+      "description": "LR4 300Hz HPF Stage 2 (24 dB/oct total; unloads TV 20W sub & chassis resonance)"
     },
     {
-      "band": 3,
+      "band": 11,
       "device": "SpeakerOutput",
-      "type": 0,
-      "fc": 3500,
-      "q": 150,
-      "gain": 3,
-      "description": "Blauert Front-Upward Elevation Boost (Q=1.5, +3dB)"
+      "type": "peaking",
+      "fc_hz": 1000,
+      "q_factor": 1.0,
+      "gain_db": -2.0,
+      "enable": true,
+      "description": "Comb-filter & Blauert 1kHz Rear-Band (Hinten) dip -> net -10.0 dB (below -9.5 dB VLT)"
     },
     {
-      "band": 4,
+      "band": 12,
       "device": "SpeakerOutput",
-      "type": 0,
-      "fc": 2000,
-      "q": 120,
-      "gain": 5,
-      "description": "Dialogue Consonant & Speech Intelligibility Peaking (Q=1.2, +5dB)"
+      "type": "peaking",
+      "fc_hz": 4000,
+      "q_factor": 1.4,
+      "gain_db": 2.0,
+      "enable": true,
+      "description": "Wallis & Lee (2016/2020) 4kHz vertical pull + Blauert Front (Vorn) presence -> net -6.0 dB"
+    },
+    {
+      "band": 13,
+      "device": "SpeakerOutput",
+      "type": "peaking",
+      "fc_hz": 8000,
+      "q_factor": 1.4,
+      "gain_db": 1.5,
+      "enable": true,
+      "description": "Blauert 8kHz Overhead (Oben) + Wallis & Lee (2020) pinna elevation cue -> net -6.5 dB"
     }
   ]
 }

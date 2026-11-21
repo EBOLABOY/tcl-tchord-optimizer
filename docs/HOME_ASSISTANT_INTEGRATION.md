@@ -1,56 +1,16 @@
-# Home Assistant 自动化与状态监控集成指南 (v2.1)
+# Home Assistant 自动化与状态监控集成指南 (v3.1)
 
-本项目提供了与 **Home Assistant (HAOS / Supervised / Container)** 的全自动联动方案，实现：
-1. **开机自愈（Zero-Touch Auto-Injection）**：实时监听电视状态变化，开机 3.5 秒内自动通过 ADB 及内存注入器向 MediaTek Audio HAL 注入精准时延、-8dB ICLD 衰减与分频参数。
-2. **仪表盘状态感知（Live UI Status Monitoring）**：通过 Mushroom 仪表盘卡片实时展现优化生效状态、11 种音频格式时延、480Hz Linkwitz-Riley 4阶高通分频与 Blauert 3.5kHz 人声抬升指标。
-3. **一键重新校准（Manual One-Tap Recalibration）**：可在 HA 仪表盘上一键触发重新注入。
-
----
-
-## 架构拓扑
-
-```
-+-------------------------------------------------------+
-| Home Assistant Dashboard (Lovelace UI)               |
-| - sensor.tcl_tchord_status: 已优化 (校准生效)         |
-| - button.tcl_the_xian_sheng_xue_zhong_xin_xiao_zhun   |
-+--------------------------+----------------------------+
-                           | Tap Button / REST Action
-                           v
-+-------------------------------------------------------+
-| t_chord_service (Systemd daemon on Host/NAS/Router)   |
-| - HTTP Port 8998: POST /inject, POST /restore, /status|
-| - WebSocket Client: 实时监听 media_player.tv 状态      |
-+-------------+-----------------------------+-----------+
-              |                             |
-       ADB Port 5555                 HTTPS Port 8043
-              v                             v
-+---------------------------+ +-------------------------+
-| TCL 75Q9M Pro TV          | | TCL Q95K Flagship       |
-| MediaTek MT9653 (Android) | | Soundbar (11.1.4 DSP)   |
-| Audio HAL In-RAM Tuned    | | Baseline Latency: 0ms   |
-+---------------------------+ +-------------------------+
-```
+后台守护服务 [`scripts/t_chord_service.py`](../scripts/t_chord_service.py) 通过带心跳保活（`heartbeat=30s`）的 Home Assistant WebSocket 实时监听电视开机状态：
+1. **开机自愈**：电视由 `off/standby/unavailable` 切入开机态 4 秒后，自动下发 v3.1 PBA 校准并在电视 `logcat` 中核验生效。
+2. **动态状态上报**：自动从 `configs/default_codec_latency.json` 读取当前分频点、ICLD 衰减与 5 段 PBA 曲线，写入 `sensor.tcl_tchord_status`。
+3. **一键校准与还原**：提供 `POST :8998/inject`、`POST :8998/restore`、`GET :8998/status`、`GET :8998/diagnose`。
 
 ---
 
-## 1. 部署后台守护进程 (`t_chord_service.py`)
+## 1. 部署 Systemd 服务
 
-在局域网内任意常开 Linux 主机（如 Proxmox VE、软路由、树莓派或 NAS）上运行。
+参考模板 [`scripts/tcl-tchord.service`](../scripts/tcl-tchord.service)，安装至 `/etc/systemd/system/tcl-tchord.service` 并填入你的 HA Long-Lived Access Token：
 
-### 方式 A：命令行传参
-```bash
-python3 scripts/t_chord_service.py \
-  --ha-host 192.168.100.4 \
-  --ha-port 8123 \
-  --ha-token "YOUR_HA_LONG_LIVED_ACCESS_TOKEN" \
-  --tv-ip 192.168.100.101 \
-  --entity-id media_player.ke_ting_dian_shi \
-  --port 8998
-```
-
-### 方式 B：Systemd 系统服务（推荐）
-编辑 `/etc/systemd/system/tcl-tchord.service`：
 ```ini
 [Unit]
 Description=TCL T-Chord Joint Optimizer Service & Home Assistant Bridge
@@ -73,7 +33,6 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-激活并启动服务：
 ```bash
 systemctl daemon-reload
 systemctl enable --now tcl-tchord.service
@@ -83,10 +42,7 @@ systemctl enable --now tcl-tchord.service
 
 ## 2. Home Assistant 配置 (`configuration.yaml`)
 
-在 Home Assistant 的 `configuration.yaml` 中添加：
-
 ```yaml
-# 1. 注册 REST 注入动作
 rest_command:
   tcl_tchord_inject:
     url: "http://<SERVICE_HOST_IP>:8998/inject"
@@ -95,7 +51,6 @@ rest_command:
     url: "http://<SERVICE_HOST_IP>:8998/restore"
     method: POST
 
-# 2. 注册实体按钮（用于 UI 触发）
 template:
   - button:
       - name: "TCL T和弦声学重新校准"
@@ -110,23 +65,18 @@ template:
           - action: rest_command.tcl_tchord_restore
 ```
 
-保存后在 **开发者工具 -> YAML** 中点击 **重载所有 YAML 配置**。
-
 ---
 
-## 3. Lovelace 仪表盘卡片（Mushroom 风格）
+## 3. Lovelace 动态仪表盘卡片（Mushroom 风格）
 
-在仪表盘添加以下卡片配置：
+标签内容直接读取 `sensor.tcl_tchord_status` 实时属性，修改 JSON 后自动同步：
 
 ```yaml
-# 状态主卡片
 - type: custom:mushroom-template-card
-  primary: "TCL T和弦声学优化"
+  primary: "TCL T和弦声学优化 (v3.1 PBA)"
   secondary: "{{ states('sensor.tcl_tchord_status') }} · 点按重新校准"
   icon: mdi:speaker-multiple
   icon_color: "{% if '已优化' in states('sensor.tcl_tchord_status') %}teal{% elif '待机' in states('sensor.tcl_tchord_status') %}blue{% else %}grey{% endif %}"
-  badge_icon: "{% if '已优化' in states('sensor.tcl_tchord_status') %}mdi:check-circle{% else %}mdi:clock-outline{% endif %}"
-  badge_color: "{% if '已优化' in states('sensor.tcl_tchord_status') %}green{% else %}amber{% endif %}"
   tap_action:
     action: call-service
     service: button.press
@@ -135,71 +85,17 @@ template:
   hold_action:
     action: more-info
   entity: sensor.tcl_tchord_status
-  card_mod:
-    style: |
-      ha-card {
-        background: #101b1f;
-        border: 1px solid rgba(83, 205, 181, 0.20);
-        border-radius: 8px;
-        box-shadow: none;
-        --primary-text-color: #edf6f5;
-        --secondary-text-color: #9bb2b0;
-      }
 
-# 声学校准指标标签卡片
 - type: custom:mushroom-chips-card
   alignment: justify
   chips:
     - type: template
-      icon: mdi:clock-fast
-      content: "对齐: 80ms"
-      tap_action:
-        action: more-info
-        entity: sensor.tcl_tchord_status
-    - type: template
       icon: mdi:filter-variant
-      content: "高通: 480Hz LR4"
-      tap_action:
-        action: more-info
-        entity: sensor.tcl_tchord_status
+      content: "{{ state_attr('sensor.tcl_tchord_status', 'crossover_frequency') or '300Hz LR4' }}"
     - type: template
       icon: mdi:volume-minus
-      content: "衰减: -8dB ICLD"
-      tap_action:
-        action: more-info
-        entity: sensor.tcl_tchord_status
+      content: "ICLD: {{ state_attr('sensor.tcl_tchord_status', 'icld_level_balance') or '-8.0 dB' }}"
     - type: template
-      icon: mdi:arrow-up-bold
-      content: "高度: +3dB Blauert"
-      tap_action:
-        action: more-info
-        entity: sensor.tcl_tchord_status
-  card_mod:
-    style: |
-      ha-card {
-        background: transparent;
-        border: 0;
-        border-radius: 0;
-        box-shadow: none;
-        --chip-background: #17292d;
-        --chip-border-width: 1px;
-        --chip-border-color: rgba(83, 205, 181, 0.18);
-      }
+      icon: mdi:clock-check-outline
+      content: "原生 CEC 时延"
 ```
-
----
-
-## 4. 实体属性一览
-
-点击卡片弹出 `more-info` 浮窗，可查看当前生效的所有声学校准属性：
-
-| 属性 Key | 当前值 | 声学意义 |
-| :--- | :--- | :--- |
-| `state` | `已优化 (校准生效)` | 只有在底层真正注入成功后才会显示该状态 |
-| `tv_model` | `TCL 75Q9M Pro (Pentonic 700 / MT9653)` | 电视硬件型号及芯片平台 |
-| `soundbar_model` | `TCL Q95K 11.1.4 (Illusonic DSP Type 13)` | 回音壁声学架构及 DSP 类型 |
-| `crossover_frequency`| `480 Hz Linkwitz-Riley 4阶 (24dB/oct)` | 保护电视微型换能器，切除低频塑料共鸣与反相抵消 |
-| `icld_level_balance` | `-8 dB (TV SpeakerOutput attenuation)` | 通道声级差控制，防止抢占回音壁声舞台 |
-| `dialogue_elevation` | `+3 dB 屏幕中心抬升 (Blauert 3.5kHz, Q=1.5)` | 抑制梳状滤波，利用 Blauert 频带将人声稳固拉回屏幕正中 |
-| `mode` | `T-Chord 联合声学对齐 (JAES 2015 梳状滤波消除)` | 消除垂直平面哈斯效应假设失效带来的声染色 |
-| `disk_safety` | `100% 纯内存生效 (断电物理复原)` | 零刷机、零改写只读系统镜像 |
